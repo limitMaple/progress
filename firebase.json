@@ -10,7 +10,7 @@
       {
         "source": "**",
         "run": {
-          "serviceId": "remotemaple-51048",
+          "serviceId": "clavi",
           "region": "asia-northeast1"
         }
       }
