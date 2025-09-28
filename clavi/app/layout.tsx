@@ -1,8 +1,7 @@
 
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import "./globals.css";
-import { AuthProvider } from "@/auth/AuthContext";
+import "@/app/globals.css";
 import Header from "@/app/header";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -20,7 +19,6 @@ export default function RootLayout({
     return (
         <html lang="ja">
         <body className={`${inter.className} bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100`}>
-        <AuthProvider>
         <div className="flex flex-col min-h-screen">
             {/* ヘッダー */}
             <Header />
@@ -36,7 +34,6 @@ export default function RootLayout({
                 </div>
             </footer>
         </div>
-        </AuthProvider>
         </body>
         </html>
     );

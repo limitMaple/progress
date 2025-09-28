@@ -1,8 +1,0 @@
-{
-  "devDependencies": {
-    "eslint": "^9.29.0"
-  },
-  "dependencies": {
-    "@google/genai": "^1.8.0"
-  }
-}
