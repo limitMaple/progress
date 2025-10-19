@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getAuth } from "firebase/auth";
-import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
+import {collection, getDocs, updateDoc, doc, deleteDoc} from "firebase/firestore";
 import { db, app } from "@/lib/firebase";
 import {onAuthStateChanged} from "@firebase/auth";
 
@@ -45,8 +45,11 @@ export default function TasksPage() {
         );
     };
 
-    const toggleView = async () => {
-        setViewDone( prevState => !prevState);
+    const deleteTask = async (id: string) => {
+        if (!auth.currentUser) return;
+        const ref = doc(db, "users", auth.currentUser.uid, "tasks", id);
+        await deleteDoc(ref);
+        fetchTasks()
     };
 
     return (
@@ -66,6 +69,11 @@ export default function TasksPage() {
                                 </div>
                                 <span className={task.done ? 'text-muted' : ''}>{task.name}</span>
                             </li>
+                            <li className="flex items-center gap-3">
+                                <button className="btn" onClick={() => deleteTask(task.id)}>
+                                    削除
+                                </button>
+                            </li>
                         </div>
                     ))}
                 </ul>
@@ -74,13 +82,6 @@ export default function TasksPage() {
                 新規タスク作成
             </a>
             <br></br>
-
-            <br></br>
-
-            <br></br>
-            <button className="btn" onClick={() => toggleView()}>
-                {viewDone ? "達成済みを表示" : "未達成を表示"}
-            </button>
         </main>
     );
 }
