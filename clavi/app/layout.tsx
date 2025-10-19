@@ -20,9 +20,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 {/* Googleログイン/ログアウトボタンはここに配置予定 */}
             </header>
             <main className="flex-1 p-4">{children}</main>
-            <footer className="bg-gray-200 text-center text-sm p-2">
-                © 2025 Task Manager
-            </footer>
+            © 2025 Task Manager
         </div>
         </body>
         </html>
