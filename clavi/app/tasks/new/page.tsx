@@ -34,7 +34,7 @@ export default function NewTaskPage() {
                     onChange={(e) => setName(e.target.value)}
                     placeholder="タスク名"
                 />
-                <button type="submit">
+                <button className="btn">
                     作成
                 </button>
             </form>

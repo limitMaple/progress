@@ -13,7 +13,7 @@ export default function LoginPage() {
 
     return (
         <main>
-            <button
+            <button className="btn"
                 onClick={handleLogin}
             >
                 Googleでログイン
