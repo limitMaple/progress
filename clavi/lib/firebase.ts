@@ -1,26 +1,38 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Web アプリの設定値はブラウザに配られる公開情報なので、ビルド時の環境変数にせずそのまま書く
+// （守りたいものは Firestore のルールと Functions の認証で守る）
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+    apiKey: "AIzaSyD1IhuYbNdzetAvGhw-8VuK5a0SFrPo-Bs",
+    authDomain: "remotemaple-51048.firebaseapp.com",
+    projectId: "remotemaple-51048",
+    storageBucket: "remotemaple-51048.firebasestorage.app",
+    messagingSenderId: "1032498603245",
+    appId: "1:1032498603245:web:e233b8ba1b2d89076298e4",
 };
 
-// Initialize Firebase
-export const app = initializeApp(firebaseConfig);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
 export const db = getFirestore(app);
+
+const functions = getFunctions(app, "asia-northeast1");
+
+// `npm run dev` のときは本番ではなくローカルのエミュレーター（`npm run emulators`）につなぐ
+// ページと同じホスト名にしないと、ポップアップのログインが「No matching frame」で失敗する
+if (process.env.NODE_ENV === "development" && !auth.emulatorConfig) {
+    const host = typeof window === "undefined" ? "127.0.0.1" : window.location.hostname;
+    connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+    connectFirestoreEmulator(db, host, 8080);
+    connectFunctionsEmulator(functions, host, 5001);
+}
+
+/** Cloud Functions の呼び出し。失敗時は Functions 側のメッセージを持った Error を投げる。 */
+export function callFunction<Req, Res>(name: string) {
+    const fn = httpsCallable<Req, Res>(functions, name);
+    return async (data: Req) => (await fn(data)).data;
+}

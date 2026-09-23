@@ -1,12 +1,8 @@
-import { redirect } from "next/navigation";
-import { getAuth } from "firebase/auth";
-import { app } from "@/lib/firebase";
+"use client";
+
+import SignedIn from "@/components/SignedIn";
+import Sessions from "@/components/Sessions";
 
 export default function HomePage() {
-    const auth = getAuth(app);
-    if (!auth.currentUser) {
-        redirect("/login");
-    } else {
-        redirect("/tasks");
-    }
+    return <SignedIn>{(user) => <Sessions uid={user.uid} />}</SignedIn>;
 }

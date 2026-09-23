@@ -1,0 +1,56 @@
+// Toggl の記録で進捗を計算して保存する。作業時間に達していれば達成にする。
+// 課金はしない（それは settle.js の仕事）。
+
+import { getFirestore } from 'firebase-admin/firestore';
+import { loadAccount, sessionsRef } from './store.js';
+import { togglClient } from './api.js';
+import { trackedSeconds } from './progress.js';
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * 進行中のセッションの進捗を更新する。ids を渡すとそのセッションだけを対象にする。
+ * Toggl の取得に失敗したときは例外を投げる。
+ * @returns {{ synced: object[], done: object[] }}
+ */
+export async function syncSessions(uid, ids) {
+  const [{ tokens }, snap] = await Promise.all([
+    loadAccount(uid),
+    sessionsRef(uid).where('status', 'in', ['active', 'error']).get(),
+  ]);
+  const targets = snap.docs.map((d) => d.data()).filter((s) => !ids || ids.includes(s.id));
+  const result = { synced: [], done: [] };
+  if (targets.length === 0) return result;
+  if (!tokens.togglToken) throw new Error('TogglのAPIトークンが未設定です');
+
+  const now = Date.now();
+  // start_date は記録の開始時刻で絞られるので、セッション開始前から続く記録も拾えるよう広めに取る
+  const from = Math.min(...targets.map((s) => s.createdAt)) - DAY;
+  const entries = await togglClient(tokens.togglToken).timeEntries(
+    new Date(from).toISOString(),
+    new Date(now + DAY).toISOString(),
+  );
+
+  const batch = getFirestore().batch();
+  for (const session of targets) {
+    // 締切を過ぎた分は数えないので、締切後は値が動かない
+    const patch = {
+      trackedSec: trackedSeconds(
+        entries,
+        { from: session.createdAt, to: Math.min(now, session.due), tag: session.tag },
+        now,
+      ),
+      updatedAt: now,
+    };
+    if (patch.trackedSec >= session.requiredSec) {
+      patch.status = 'done';
+      patch.checkAt = null;
+      result.done.push({ ...session, ...patch });
+    }
+    batch.update(sessionsRef(uid).doc(session.id), patch);
+    result.synced.push({ ...session, ...patch });
+  }
+
+  await batch.commit();
+  return result;
+}
