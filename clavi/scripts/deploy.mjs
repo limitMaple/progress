@@ -12,6 +12,9 @@ const [target = "hosting,functions,firestore", ...rest] = process.argv.slice(2);
 const child = spawn("firebase", ["deploy", "--only", target, ...rest], {
     stdio: "inherit",
     shell: true,
-    env: { ...process.env, FUNCTIONS_DISCOVERY_TIMEOUT: "120" },
+    env: {
+        FUNCTIONS_DISCOVERY_TIMEOUT: "120",
+        ...process.env, // 外から渡した値の方を優先する（調べるときに既定の 10 秒へ戻せるように）
+    },
 });
 child.on("exit", (code) => process.exit(code ?? 1));
