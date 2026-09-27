@@ -2,13 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { callFunction } from "@/lib/firebase";
+import { saveSettings } from "@/lib/firebase";
 import { useSettings } from "@/lib/account";
-
-const saveSettings = callFunction<
-    { togglToken: string; beeminderToken: string; defaultDollars: number; dryRun: boolean },
-    { ok: boolean; message: string }
->("saveSettings");
+import type { SaveSettingsResponse } from "@/functions/src/model";
 
 export default function SettingsForm({ uid }: { uid: string }) {
     const settings = useSettings(uid);
@@ -17,7 +13,7 @@ export default function SettingsForm({ uid }: { uid: string }) {
     const [dollars, setDollars] = useState("");
     const [dryRun, setDryRun] = useState(true);
     const [busy, setBusy] = useState(false);
-    const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+    const [status, setStatus] = useState<SaveSettingsResponse | null>(null);
 
     // 保存済みの値は最初の 1 回だけ入れる（保存後の更新で入力中の値を消さないため）
     const loaded = settings !== null;

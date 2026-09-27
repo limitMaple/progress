@@ -2,16 +2,21 @@
   "name": "toggl-ratchet-functions",
   "private": true,
   "type": "module",
-  "main": "index.js",
+  "main": "lib/index.js",
   "engines": {
     "node": "22"
   },
   "scripts": {
-    "test": "node --test",
-    "test:unit": "node --test test/progress.test.js"
+    "build": "tsc",
+    "test": "tsc && node --test \"lib/test/*.test.js\"",
+    "test:unit": "tsc && node --test lib/test/progress.test.js"
   },
   "dependencies": {
     "firebase-admin": "^14.4.0",
     "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
   }
 }

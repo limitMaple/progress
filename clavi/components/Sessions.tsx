@@ -4,23 +4,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { signOut } from "firebase/auth";
 import { deleteDoc, doc } from "firebase/firestore";
-import { auth, db, callFunction } from "@/lib/firebase";
-import { useSessions, useSettings, type Session } from "@/lib/account";
+import { auth, db, startSession, syncNow, settleNow } from "@/lib/firebase";
+import { useSessions, useSettings } from "@/lib/account";
 import {
     resolveDeadline, defaultDeadline, formatDuration, formatDay, formatDeadline,
-} from "@/functions/src/progress.js";
+} from "@/functions/src/progress";
+import type { ChargeResolution, Session, SessionStatus } from "@/functions/src/model";
 
 const HOUR = 60 * 60 * 1000;
-
-const startSession = callFunction<
-    { tag: string; requiredSec: number; due: number; dollars: number },
-    { id: string }
->("startSession");
-const syncNow = callFunction<void, { done: string[] }>("syncNow");
-const settleNow = callFunction<
-    { id: string; resolve?: "charged" | "not_charged" },
-    { status: string; message: string }
->("settleNow");
 
 type Message = { text: string; kind: "" | "ok" | "error" };
 
@@ -249,7 +240,8 @@ function NewSessionForm({ tags, defaultDollars, dryRun, disabled, setBusy, setMe
 
 // ---- 一覧の 1 件 ----
 
-const STATUS_LABELS = {
+// settling は「締切を過ぎた active」（精算を待っている）の表示用
+const STATUS_LABELS: Record<SessionStatus | "settling", string> = {
     active: "進行中",
     settling: "精算待ち",
     done: "達成",
@@ -272,7 +264,7 @@ function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
     // 課金 API の途中で失敗して、課金されたか分からない。人が Beeminder の履歴で確かめる
     const unresolved = Boolean(session.chargeRequestedAt) && !session.charge && now >= session.due;
 
-    async function settle(resolve?: "charged" | "not_charged") {
+    async function settle(resolve?: ChargeResolution) {
         if (busy) return;
         if (resolve === "not_charged" && !confirm(
             `Beeminderの課金履歴に「${session.title}」の$${session.dollars}が無いことを確かめましたか？`

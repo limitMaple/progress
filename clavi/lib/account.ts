@@ -4,46 +4,7 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-
-// Firestore のデータの形は functions/src/store.js を参照
-
-export type Settings = {
-    defaultDollars: number;
-    dryRun: boolean;
-    tags: string[];
-    hasTogglToken: boolean;
-    hasBeeminderToken: boolean;
-    beeminderUser: string;
-};
-
-export const DEFAULT_SETTINGS: Settings = {
-    defaultDollars: 10,
-    dryRun: true,
-    tags: [],
-    hasTogglToken: false,
-    hasBeeminderToken: false,
-    beeminderUser: "",
-};
-
-export type SessionStatus = "active" | "done" | "charged" | "error";
-
-export type Session = {
-    id: string;
-    title: string;
-    tag: string;
-    requiredSec: number;
-    createdAt: number;
-    due: number;
-    dollars: number;
-    status: SessionStatus;
-    trackedSec: number;
-    updatedAt: number | null;
-    settle: { attempts: number; retryAt: number | null; message: string; at: number } | null;
-    charge: { id: string; amount: number; at: number; dryRun: boolean; manual?: boolean } | null;
-    checkAt: number | null;
-    /** 課金 API を呼んだ時刻。charge が無いのにこれがあるのは「課金されたか分からない」状態 */
-    chargeRequestedAt?: number | null;
-};
+import { DEFAULT_SETTINGS, type Session, type Settings } from "@/functions/src/model";
 
 /** ログイン中のユーザー。確認中は undefined、未ログインは null。 */
 export function useUser() {
@@ -56,12 +17,12 @@ export function useUser() {
 export function useSettings(uid: string) {
     const [settings, setSettings] = useState<Settings | null>(null);
     useEffect(() => onSnapshot(doc(db, "users", uid), (snap) => {
-        setSettings({ ...DEFAULT_SETTINGS, ...snap.data() });
+        setSettings({ ...DEFAULT_SETTINGS, ...(snap.data() as Partial<Settings> | undefined) });
     }), [uid]);
     return settings;
 }
 
-/** セッション一覧（新しい順）。自動更新の結果もそのまま反映される。 */
+/** セッション一覧（新しい順）。自動精算の結果もそのまま反映される。 */
 export function useSessions(uid: string) {
     const [sessions, setSessions] = useState<Session[]>([]);
     useEffect(() => onSnapshot(

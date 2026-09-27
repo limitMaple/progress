@@ -2,6 +2,10 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
+import type {
+    SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult,
+    StartSessionRequest, StartSessionResponse, SyncNowResponse,
+} from "@/functions/src/model";
 
 // Web アプリの設定値はブラウザに配られる公開情報なので、ビルド時の環境変数にせずそのまま書く
 // （守りたいものは Firestore のルールと Functions の認証で守る）
@@ -32,7 +36,13 @@ if (process.env.NODE_ENV === "development" && !auth.emulatorConfig) {
 }
 
 /** Cloud Functions の呼び出し。失敗時は Functions 側のメッセージを持った Error を投げる。 */
-export function callFunction<Req, Res>(name: string) {
+function callFunction<Req, Res>(name: string) {
     const fn = httpsCallable<Req, Res>(functions, name);
     return async (data: Req) => (await fn(data)).data;
 }
+
+// 画面から呼ぶ関数。名前と型は functions/index.ts の export と functions/src/model.ts に合わせる
+export const saveSettings = callFunction<SaveSettingsRequest, SaveSettingsResponse>("saveSettings");
+export const startSession = callFunction<StartSessionRequest, StartSessionResponse>("startSession");
+export const syncNow = callFunction<void, SyncNowResponse>("syncNow");
+export const settleNow = callFunction<SettleNowRequest, SettleResult>("settleNow");

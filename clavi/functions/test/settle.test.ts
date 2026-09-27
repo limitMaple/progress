@@ -4,26 +4,27 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase-admin/app';
+import { settleSession, settleManually } from '../src/settle.js';
+import { syncSessions } from '../src/sync.js';
+import { claimSettlement, sessionsRef, userRef, secretRef } from '../src/store.js';
+import type { Session, TimeEntry } from '../src/model.js';
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
   throw new Error('Firestore エミュレーターの中で動かしてください（clavi で npm test）');
 }
+// store.ts は呼ばれたときに getFirestore() するので、import のあとで初期化してよい
 initializeApp({ projectId: 'demo-toggl-ratchet' });
-
-const { settleSession, settleManually } = await import('../src/settle.js');
-const { syncSessions } = await import('../src/sync.js');
-const { claimSettlement, sessionsRef, userRef, secretRef } = await import('../src/store.js');
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 
 // ---- 偽の Toggl / Beeminder ----
 
-let togglEntries;
-let togglFails;
-let togglCalls;
-let chargeFails;
-let charges;
+let togglEntries: TimeEntry[];
+let togglFails: boolean;
+let togglCalls: number;
+let chargeFails: 'network' | 'http' | null;
+let charges: Record<string, string>[];
 
 beforeEach(() => {
   togglEntries = [];
@@ -33,12 +34,13 @@ beforeEach(() => {
   charges = [];
 });
 
-const json = (body, status = 200) => new Response(JSON.stringify(body), {
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { 'content-type': 'application/json' },
 });
 
-globalThis.fetch = async (url, init = {}) => {
+globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
+  const url = input instanceof Request ? input.url : String(input);
   const { host, pathname } = new URL(url);
   if (host === 'api.track.toggl.com') {
     togglCalls += 1;
@@ -59,12 +61,12 @@ globalThis.fetch = async (url, init = {}) => {
 let seq = 0;
 
 /** 新しいユーザーとセッションを 1 件作る。テストごとに別の uid にして干渉させない。 */
-async function setup(overrides = {}, { dryRun = false } = {}) {
+async function setup(overrides: Partial<Session> = {}, { dryRun = false } = {}) {
   const uid = `user${++seq}-${Date.now()}`;
   const now = Date.now();
   await userRef(uid).set({ beeminderUser: 'alice', dryRun });
   await secretRef(uid).set({ togglToken: 'toggl', beeminderToken: 'bee' });
-  const session = {
+  const session: Session = {
     id: `session-${seq}-abcdefgh`,
     title: 'study 1時間00分',
     tag: '',
@@ -80,16 +82,22 @@ async function setup(overrides = {}, { dryRun = false } = {}) {
     checkAt: now - MIN,
     claimedAt: null,
     chargeRequestedAt: null,
+    measuredSec: null,
     ...overrides,
   };
   await sessionsRef(uid).doc(session.id).set(session);
   return { uid, session };
 }
 
-const read = async (uid, id) => (await sessionsRef(uid).doc(id).get()).data();
+/** 保存されているセッション。無ければテストを失敗させる。 */
+async function read(uid: string, id: string): Promise<Session> {
+  const session = (await sessionsRef(uid).doc(id).get()).data();
+  assert.ok(session, `セッション ${id} がありません`);
+  return session;
+}
 
 /** start から minutes 分の、止まった記録。 */
-function entry(start, minutes) {
+function entry(start: number, minutes: number): TimeEntry {
   return {
     start: new Date(start).toISOString(),
     stop: new Date(start + minutes * MIN).toISOString(),
@@ -113,7 +121,7 @@ test('未達なら 1 回だけ課金して charged にする', async () => {
   assert.equal(charges[0].dryrun, undefined);
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'charged');
-  assert.equal(saved.charge.id, 'ch_1');
+  assert.equal(saved.charge?.id, 'ch_1');
   assert.equal(saved.checkAt, null);
   assert.equal(saved.claimedAt, null);
 });
@@ -124,7 +132,7 @@ test('テストモードなら dryrun を付けて呼ぶ', async () => {
   await settleSession(uid, session);
 
   assert.equal(charges[0].dryrun, 'true');
-  assert.equal((await read(uid, session.id)).charge.dryRun, true);
+  assert.equal((await read(uid, session.id)).charge?.dryRun, true);
 });
 
 test('締切までに達していれば課金せず done にする', async () => {
@@ -147,13 +155,15 @@ test('課金の前に失敗したら、課金せずに 1 分後の再試行を�
   assert.equal(charges.length, 0);
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'active');
-  assert.ok(saved.checkAt > Date.now() + 50 * 1000);
-  assert.equal(saved.settle.retryAt, saved.checkAt);
+  assert.ok((saved.checkAt ?? 0) > Date.now() + 50 * 1000);
+  assert.equal(saved.settle?.retryAt, saved.checkAt);
   assert.equal(saved.chargeRequestedAt ?? null, null);
 });
 
 test('3 回失敗したら error で止め、それ以上は予約しない', async () => {
-  const { uid, session } = await setup({ settle: { attempts: 2, retryAt: Date.now() - 1000 } });
+  const { uid, session } = await setup({
+    settle: { attempts: 2, retryAt: Date.now() - 1000, message: '', at: Date.now() - MIN },
+  });
   togglFails = true;
 
   const result = await settleSession(uid, session);
@@ -161,10 +171,10 @@ test('3 回失敗したら error で止め、それ以上は予約しない', as
   assert.equal(result.status, 'error');
   const saved = await read(uid, session.id);
   assert.equal(saved.checkAt, null);
-  assert.equal(saved.settle.retryAt, null);
+  assert.equal(saved.settle?.retryAt, null);
 });
 
-for (const failure of ['network', 'http']) {
+for (const failure of ['network', 'http'] as const) {
   test(`課金 API が失敗したら（${failure}）、自動では課金し直さない`, async () => {
     const { uid, session } = await setup();
     chargeFails = failure;
@@ -236,7 +246,7 @@ test('「課金されていた」なら、課金せずに charged にする', as
 
   assert.equal(result.status, 'charged');
   assert.equal(charges.length, 0);
-  assert.equal((await read(uid, session.id)).charge.manual, true);
+  assert.equal((await read(uid, session.id)).charge?.manual, true);
 });
 
 test('「課金されていなかった」なら、最初に測った値でもう一度精算する', async () => {

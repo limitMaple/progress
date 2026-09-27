@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import {
   trackedSeconds, resolveDeadline, defaultDeadline, formatDuration, formatDay, formatDeadline,
 } from '../src/progress.js';
+import type { TimeEntry } from '../src/model.js';
 
-const at = (hhmm) => new Date(`2026-09-16T${hhmm}:00`).getTime();
-const iso = (hhmm) => new Date(at(hhmm)).toISOString();
+const at = (hhmm: string) => new Date(`2026-09-16T${hhmm}:00`).getTime();
+const iso = (hhmm: string) => new Date(at(hhmm)).toISOString();
 
-function entry(start, stop, tags = []) {
+function entry(start: string, stop: string | null, tags: string[] = []): TimeEntry {
   return stop
     ? { start: iso(start), stop: iso(stop), duration: (at(stop) - at(start)) / 1000, tags }
     : { start: iso(start), stop: null, duration: -at(start) / 1000, tags };

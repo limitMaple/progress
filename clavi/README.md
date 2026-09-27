@@ -27,13 +27,14 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
 ## 構成
 
 - `app/`, `components/` … 画面（Next.js の静的書き出し、Firebase Hosting に置く）
-- `functions/` … Cloud Functions
-  - `index.js` … 画面から呼ぶ関数（設定の保存・開始・更新・精算）と、1分おきの自動精算
-  - `src/api.js` … Toggl / Beeminder の薄いクライアント
-  - `src/progress.js` … 進捗計算と表示の純粋関数（拡張版から流用、テストあり）
-  - `src/sync.js` … Toggl の記録で進捗を更新する
-  - `src/settle.js` … 締切後の精算（課金するのはここだけ）
-  - `src/store.js` … Firestore の読み書きと、二重課金を防ぐロック
+- `functions/` … Cloud Functions（TypeScript。`tsc` で `lib/` に書き出し、デプロイ前に自動でビルドされる）
+  - `index.ts` … 画面から呼ぶ関数（設定の保存・開始・更新・精算）と、1分おきの自動精算
+  - `src/model.ts` … Firestore のデータの形と、画面から呼ぶ関数の引数・戻り値。画面側もここを import する
+  - `src/api.ts` … Toggl / Beeminder の薄いクライアント
+  - `src/progress.ts` … 進捗計算と表示の純粋関数（拡張版から流用。画面側も使う）
+  - `src/sync.ts` … Toggl の記録で進捗を更新する
+  - `src/settle.ts` … 締切後の精算（課金するのはここだけ）
+  - `src/store.ts` … Firestore の読み書きと、二重課金を防ぐロック
 - Firestore
   - `users/{uid}` … 設定（本人も読める）
   - `secrets/{uid}` … API トークン（Functions からしか読めない）
@@ -44,8 +45,10 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
 ```
 npm run emulators   # Firebase エミュレーター（別のターミナルで動かしておく）
 npm run dev         # http://localhost:3000 。開発時はエミュレーターにつながる
-npm --prefix functions test
+npm test            # Functions のテスト（Firestore エミュレーターを立てて動かす。外部 API は呼ばない）
 ```
+
+Functions を書き換えたら、エミュレーターに反映するには `npm --prefix functions run build` が要ります。
 
 エミュレーターでも Toggl と Beeminder は本物の API を呼びます。課金したくないときは
 設定の「テストモード」を有効にしておいてください。

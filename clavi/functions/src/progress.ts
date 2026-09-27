@@ -1,11 +1,17 @@
-// 進捗計算と表示用の純粋関数。chrome API に依存しないので Node でテストできる。
+// 進捗計算と表示用の純粋関数。Web アプリからも import するので、Node に依存しないこと。
+
+import type { TimeEntry } from './model.js';
 
 /**
  * Toggl の time entry のうち、[from, to) に重なる部分の合計秒数を返す。
  * tag を指定した場合は、そのタグが付いた記録だけを数える。
  * 計測中の記録（stop が null）は now まで続いているものとして扱う。
  */
-export function trackedSeconds(entries, { from, to, tag }, now) {
+export function trackedSeconds(
+  entries: readonly TimeEntry[],
+  { from, to, tag }: { from: number; to: number; tag?: string },
+  now: number,
+): number {
   let totalMs = 0;
   for (const entry of entries) {
     if (tag && !(entry.tags ?? []).includes(tag)) continue;
@@ -23,9 +29,9 @@ export function trackedSeconds(entries, { from, to, tag }, now) {
 
 /**
  * "HH:MM" を now 以降で最も近いその時刻に変換する（ms）。
- * 今日のその時刻を過ぎていれば翌日扱い。
+ * 今日のその時刻を過ぎていれば翌日扱い。実行環境のタイムゾーンで解釈するので、ブラウザで呼ぶこと。
  */
-export function resolveDeadline(hhmm, now) {
+export function resolveDeadline(hhmm: string, now: number): number {
   const [h, m] = hhmm.split(':').map(Number);
   const d = new Date(now);
   d.setHours(h, m, 0, 0);
@@ -34,14 +40,14 @@ export function resolveDeadline(hhmm, now) {
 }
 
 /** now から minMs 以上先の時刻を、stepMin 分単位に切り上げて "HH:MM" で返す。 */
-export function defaultDeadline(now, minMs, stepMin = 10) {
+export function defaultDeadline(now: number, minMs: number, stepMin = 10): string {
   const step = stepMin * 60 * 1000;
   const d = new Date(Math.ceil((now + minMs) / step) * step);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** 秒数を「1時間05分」「45分」の形にする（分未満は切り捨て）。 */
-export function formatDuration(sec) {
+export function formatDuration(sec: number): string {
   const totalMin = Math.max(0, Math.floor(sec / 60));
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
@@ -49,7 +55,7 @@ export function formatDuration(sec) {
 }
 
 /** 日付を now から見た「今日」「明日」「9/18」の形にする。 */
-export function formatDay(ms, now) {
+export function formatDay(ms: number, now: number): string {
   const dayDiff = Math.round((startOfDay(ms) - startOfDay(now)) / 86400000);
   if (dayDiff === 0) return '今日';
   if (dayDiff === 1) return '明日';
@@ -58,19 +64,19 @@ export function formatDay(ms, now) {
 }
 
 /** 時刻を「23:30」「明日 1:00」「9/18 8:00」の形にする（今日なら日付を省く）。 */
-export function formatDeadline(ms, now) {
+export function formatDeadline(ms: number, now: number): string {
   const d = new Date(ms);
   const clock = `${d.getHours()}:${pad(d.getMinutes())}`;
   const day = formatDay(ms, now);
   return day === '今日' ? clock : `${day} ${clock}`;
 }
 
-function startOfDay(ms) {
+function startOfDay(ms: number): number {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
 
-function pad(n) {
+function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
