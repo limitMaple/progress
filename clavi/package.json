@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "emulators": "firebase emulators:start --only auth,firestore,functions",
-    "deploy": "next build --turbopack && firebase deploy --only hosting,functions,firestore"
+    "deploy": "next build --turbopack && node scripts/deploy.mjs",
+    "deploy:check": "next build --turbopack && node scripts/deploy.mjs hosting,functions,firestore --dry-run"
   },
   "dependencies": {
     "firebase": "^12.3.0",
