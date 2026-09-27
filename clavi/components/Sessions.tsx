@@ -17,7 +17,10 @@ const startSession = callFunction<
     { id: string }
 >("startSession");
 const syncNow = callFunction<void, { done: string[] }>("syncNow");
-const settleNow = callFunction<{ id: string }, { status: string; message: string }>("settleNow");
+const settleNow = callFunction<
+    { id: string; resolve?: "charged" | "not_charged" },
+    { status: string; message: string }
+>("settleNow");
 
 type Message = { text: string; kind: "" | "ok" | "error" };
 
@@ -266,13 +269,19 @@ function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
     const remainingTime = session.due - now;
     const ratio = Math.min(1, session.trackedSec / session.requiredSec);
     const left = session.requiredSec - session.trackedSec;
+    // 課金 API の途中で失敗して、課金されたか分からない。人が Beeminder の履歴で確かめる
+    const unresolved = Boolean(session.chargeRequestedAt) && !session.charge && now >= session.due;
 
-    async function settle() {
+    async function settle(resolve?: "charged" | "not_charged") {
         if (busy) return;
+        if (resolve === "not_charged" && !confirm(
+            `Beeminderの課金履歴に「${session.title}」の$${session.dollars}が無いことを確かめましたか？`
+            + "\nもう一度課金を試みます。",
+        )) return;
         setBusy(true);
         setMessage({ text: "", kind: "" });
         try {
-            const result = await settleNow({ id: session.id });
+            const result = await settleNow({ id: session.id, resolve });
             setMessage({ text: result.message, kind: result.status === "error" ? "error" : "ok" });
         } catch (err) {
             setMessage({ text: (err as Error).message, kind: "error" });
@@ -306,8 +315,18 @@ function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
                 <span className="updated muted">
                     {session.updatedAt ? `最終更新 ${formatDeadline(session.updatedAt, now)}` : "未更新"}
                 </span>
-                {session.status === "error" && (
-                    <button type="button" className="link" onClick={settle} disabled={busy}>精算する</button>
+                {unresolved && (
+                    <span className="actions">
+                        <button type="button" className="link" onClick={() => settle("charged")} disabled={busy}>
+                            課金されていた
+                        </button>
+                        <button type="button" className="link" onClick={() => settle("not_charged")} disabled={busy}>
+                            されていなかった
+                        </button>
+                    </span>
+                )}
+                {session.status === "error" && !unresolved && (
+                    <button type="button" className="link" onClick={() => settle()} disabled={busy}>精算する</button>
                 )}
                 {(session.status === "done" || session.status === "charged") && (
                     <button

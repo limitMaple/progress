@@ -34,17 +34,21 @@ export async function loadAccount(uid) {
  * セッション = 「締切までに指定の時間やる」という 1 件の約束。
  * { id, title, tag, requiredSec, createdAt, due, dollars,
  *   status: 'active' | 'done' | 'charged' | 'error', trackedSec, updatedAt,
- *   settle: { attempts, retryAt, message, at }, charge: { id, amount, at },
- *   checkAt, claimedAt }
+ *   settle: { attempts, retryAt, message, at }, charge: { id, amount, at, dryRun, manual },
+ *   checkAt, claimedAt, chargeRequestedAt, measuredSec }
  * 時刻はすべて ms。checkAt は次に精算を試みる時刻で、定期実行はこれを見て探す。
+ * measuredSec は精算で最初に測った作業時間。再試行ではこれを使い、Toggl を測り直さない。
+ * chargeRequestedAt は課金 API を呼ぶ直前に立てる印で、立っていて charge が無いものは
+ * 「課金されたか分からない」状態。人が確かめるまで自動では触らない。
  */
 
 /**
  * 精算（締切を過ぎたセッションの判定と課金）に取りかかる権利を取る。
  * 取れたらセッションを返し、他の処理が持っているなら null を返す。
  * 定期実行と手動の精算が同時に走っても、課金が 2 回行われないようにするため。
+ * 課金されたか分からないセッションは、resolving（人が確かめた）のときだけ取れる。
  */
-export async function claimSettlement(uid, id) {
+export async function claimSettlement(uid, id, { resolving = false } = {}) {
   const ref = sessionsRef(uid).doc(id);
   return getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -53,6 +57,7 @@ export async function claimSettlement(uid, id) {
     if (!session) return null;
     if (session.charge) return null;
     if (session.status !== 'active' && session.status !== 'error') return null;
+    if (session.chargeRequestedAt && !resolving) return null;
     if (session.claimedAt && now - session.claimedAt < CLAIM_TTL) return null;
     tx.update(ref, { claimedAt: now });
     return { ...session, claimedAt: now };

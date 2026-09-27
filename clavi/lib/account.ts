@@ -39,8 +39,10 @@ export type Session = {
     trackedSec: number;
     updatedAt: number | null;
     settle: { attempts: number; retryAt: number | null; message: string; at: number } | null;
-    charge: { id: string; amount: number; at: number; dryRun: boolean } | null;
+    charge: { id: string; amount: number; at: number; dryRun: boolean; manual?: boolean } | null;
     checkAt: number | null;
+    /** 課金 API を呼んだ時刻。charge が無いのにこれがあるのは「課金されたか分からない」状態 */
+    chargeRequestedAt?: number | null;
 };
 
 /** ログイン中のユーザー。確認中は undefined、未ログインは null。 */

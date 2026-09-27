@@ -1,7 +1,12 @@
 // 締切を過ぎたセッションの精算。達成していなければ Beeminder で自分に課金する。
 // 課金するのはここだけ。必ず claimSettlement で権利を取ってから呼ぶこと。
+//
+// 二重課金を防ぐため、課金 API を呼ぶ直前に chargeRequestedAt を保存する。
+// それより後で失敗したら「課金されたか分からない」ので、自動では課金し直さず、
+// 人が Beeminder の履歴を確かめて settleManually で決着をつける。
+// （Beeminder の課金 API には、同じ依頼を 1 回分として扱う仕組みがない）
 
-import { loadAccount, sessionsRef } from './store.js';
+import { loadAccount, sessionsRef, claimSettlement } from './store.js';
 import { beeminderClient } from './api.js';
 import { syncSessions } from './sync.js';
 import { formatDuration } from './progress.js';
@@ -16,59 +21,101 @@ export const settleTime = (session) => session.settle?.retryAt ?? session.due + 
 /**
  * セッションを 1 件精算する。
  * 進捗を取り直し、達成していなければ賭けた額を課金する。
- * 途中で失敗したら 1 分おきに最大 3 回まで試し、それでもだめなら status を 'error' にする。
- * （課金されたかどうか分からない状態を避けるため、失敗したぶんを後からまとめて課金はしない）
- * @returns {{ status: string, message: string }}
+ * 課金の前に失敗したら 1 分おきに最大 3 回まで試し、それでもだめなら status を 'error' にする。
+ * 課金に取りかかったあとで失敗したら、再試行せずに 'error' で止める。
+ * @returns {Promise<{ status: string, message: string }>}
  */
 export async function settleSession(uid, session) {
+  const ref = sessionsRef(uid).doc(session.id);
   const attempts = (session.settle?.attempts ?? 0) + 1;
+  // check: 判定中 → charging: 課金 API を呼んだ → charged: 課金 API が成功した
+  let stage = 'check';
+  let charge = null;
+  let message = '';
 
   try {
-    const synced = (await syncSessions(uid, [session.id])).synced[0] ?? session;
-    if (synced.status === 'done') {
-      return await finish(uid, session.id, attempts, 'done', {
-        message: `達成しました（${formatDuration(synced.trackedSec)}）。課金はありません。`,
+    // 締切後に一度測った値があればそれを使う。測り直すと、あとから Toggl に足した記録まで数えてしまう
+    let trackedSec = session.measuredSec;
+    if (trackedSec == null) {
+      trackedSec = ((await syncSessions(uid, [session.id])).synced[0] ?? session).trackedSec;
+      await ref.update({ measuredSec: trackedSec });
+    }
+    // sync は締切後に達成にしないので、到達したかはここで見る
+    if (trackedSec >= session.requiredSec) {
+      return await finish(ref, attempts, 'done', {
+        message: `達成しました（${formatDuration(trackedSec)}）。課金はありません。`,
       });
     }
 
     const { settings, tokens } = await loadAccount(uid);
     if (!tokens.beeminderToken) throw new Error('BeeminderのAPIトークンが未設定です');
-    const charge = await beeminderClient(tokens.beeminderToken).charge({
+
+    await ref.update({ chargeRequestedAt: Date.now(), checkAt: null });
+    stage = 'charging';
+    const result = await beeminderClient(tokens.beeminderToken).charge({
       user: settings.beeminderUser,
       amount: session.dollars,
-      note: `Toggl Ratchet: ${session.title}`,
+      // Beeminder の履歴と突き合わせられるよう、セッション ID の頭を入れておく
+      note: `Toggl Ratchet: ${session.title} (${session.id.slice(0, 8)})`,
       dryrun: settings.dryRun,
     });
-    const short = `${formatDuration(synced.trackedSec)} / ${formatDuration(session.requiredSec)}`;
-    return await finish(uid, session.id, attempts, 'charged', {
-      message: settings.dryRun
-        ? `届きませんでした（${short}）。テストモードなので課金していません（$${session.dollars}）。`
-        : `届きませんでした（${short}）。$${session.dollars}を課金しました。`,
-      charge: {
-        id: String(charge?.id ?? ''),
-        amount: Number(charge?.amount ?? session.dollars),
-        at: Date.now(),
-        dryRun: Boolean(settings.dryRun),
-      },
-    });
+    stage = 'charged';
+
+    const short = `${formatDuration(trackedSec)} / ${formatDuration(session.requiredSec)}`;
+    message = settings.dryRun
+      ? `届きませんでした（${short}）。テストモードなので課金していません（$${session.dollars}）。`
+      : `届きませんでした（${short}）。$${session.dollars}を課金しました。`;
+    charge = {
+      id: String(result?.id ?? ''),
+      amount: Number(result?.amount ?? session.dollars),
+      at: Date.now(),
+      dryRun: Boolean(settings.dryRun),
+      manual: false,
+    };
+    return await finish(ref, attempts, 'charged', { message, charge });
   } catch (err) {
-    const now = Date.now();
-    const canRetry = attempts < MAX_ATTEMPTS;
-    const message = canRetry
-      ? `精算に失敗したので再試行します: ${err.message}`
-      : `精算に失敗しました: ${err.message}`;
-    await sessionsRef(uid).doc(session.id).update({
-      status: 'error',
-      settle: { attempts, retryAt: canRetry ? now + RETRY_DELAY : null, message, at: now },
-      checkAt: canRetry ? now + RETRY_DELAY : null,
-      claimedAt: null,
-    });
-    return { status: 'error', message };
+    if (stage === 'check') return retryLater(ref, session, attempts, err);
+    if (stage === 'charged') {
+      // 課金は通ったので、記録だけもう一度試す。これも失敗したら例外のまま上に返す
+      // （chargeRequestedAt が立っているので、再び課金されることはない）
+      return finish(ref, attempts, 'charged', { message, charge });
+    }
+    return stopForReview(ref, attempts, err);
   }
 }
 
-async function finish(uid, id, attempts, status, { message, charge = null }) {
-  await sessionsRef(uid).doc(id).update({
+/** 課金の前に失敗した。締切後の処理なので status は active のまま、少し後にやり直す。 */
+async function retryLater(ref, session, attempts, err) {
+  const now = Date.now();
+  const canRetry = attempts < MAX_ATTEMPTS;
+  const message = canRetry
+    ? `精算に失敗したので、1分後にやり直します（${attempts}/${MAX_ATTEMPTS}）: ${err.message}`
+    : `精算に失敗しました: ${err.message}`;
+  const retryAt = canRetry ? now + RETRY_DELAY : null;
+  await ref.update({
+    status: canRetry ? session.status : 'error',
+    settle: { attempts, retryAt, message, at: now },
+    checkAt: retryAt,
+    claimedAt: null,
+  });
+  return { status: canRetry ? session.status : 'error', message };
+}
+
+/** 課金 API の途中で失敗した。課金されたか分からないので、人が確かめるまで止める。 */
+async function stopForReview(ref, attempts, err) {
+  const message = `課金されたか分かりません（${err.message}）。`
+    + 'Beeminderの課金履歴を確かめて、画面から「課金されていた / いなかった」を選んでください。';
+  await ref.update({
+    status: 'error',
+    settle: { attempts, retryAt: null, message, at: Date.now() },
+    checkAt: null,
+    claimedAt: null,
+  });
+  return { status: 'error', message };
+}
+
+async function finish(ref, attempts, status, { message, charge = null }) {
+  await ref.update({
     status,
     charge,
     settle: { attempts, retryAt: null, message, at: Date.now() },
@@ -76,4 +123,46 @@ async function finish(uid, id, attempts, status, { message, charge = null }) {
     claimedAt: null,
   });
   return { status, message };
+}
+
+/**
+ * 画面からの精算。締切後に止まっているセッションを片付ける。
+ * 課金されたか分からないセッションは、resolve で人の判断を受け取る:
+ *   'charged'     … Beeminder の履歴に課金があった。課金せずに課金済みにする
+ *   'not_charged' … 履歴に課金がなかった。印を消してもう一度精算する
+ * @returns {Promise<{ status: string, message: string }>}
+ */
+export async function settleManually(uid, id, resolve) {
+  // 締切前は権利を取る前に弾く（取ってから弾くと、ロックが残って自動精算を邪魔する）
+  const current = (await sessionsRef(uid).doc(id).get()).data();
+  if (!current) throw new Error('セッションが見つかりません');
+  if (Date.now() < current.due) throw new Error('締切前なので精算できません');
+
+  const unresolved = Boolean(current.chargeRequestedAt) && !current.charge;
+  if (unresolved && resolve !== 'charged' && resolve !== 'not_charged') {
+    throw new Error('課金されたかの確認が必要です');
+  }
+
+  const session = await claimSettlement(uid, id, { resolving: unresolved });
+  if (!session) throw new Error('このセッションは精算できません（処理中か、精算済みです）');
+  const ref = sessionsRef(uid).doc(id);
+
+  if (unresolved && resolve === 'charged') {
+    const { settings } = await loadAccount(uid);
+    return finish(ref, (session.settle?.attempts ?? 0) + 1, 'charged', {
+      message: `課金済みとして記録しました（Beeminderの履歴で確認, $${session.dollars}）。`,
+      charge: {
+        id: '',
+        amount: session.dollars,
+        at: Date.now(),
+        dryRun: Boolean(settings.dryRun),
+        manual: true,
+      },
+    });
+  }
+  if (unresolved) {
+    await ref.update({ chargeRequestedAt: null });
+    return settleSession(uid, { ...session, chargeRequestedAt: null });
+  }
+  return settleSession(uid, session);
 }

@@ -1,4 +1,4 @@
-// Toggl の記録で進捗を計算して保存する。作業時間に達していれば達成にする。
+// Toggl の記録で進捗を計算して保存する。締切前に作業時間へ達していれば達成にする。
 // 課金はしない（それは settle.js の仕事）。
 
 import { getFirestore } from 'firebase-admin/firestore';
@@ -42,7 +42,9 @@ export async function syncSessions(uid, ids) {
       ),
       updatedAt: now,
     };
-    if (patch.trackedSec >= session.requiredSec) {
+    // 締切後は達成にしない。Toggl には過去の時刻で記録を足せるので、締切後に足した記録で
+    // 課金を逃れられてしまう。締切後の判定は精算（settle.js）だけが行う。
+    if (patch.trackedSec >= session.requiredSec && now < session.due) {
       patch.status = 'done';
       patch.checkAt = null;
       result.done.push({ ...session, ...patch });

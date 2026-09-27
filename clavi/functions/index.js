@@ -10,7 +10,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as logger from 'firebase-functions/logger';
 import { loadAccount, userRef, secretRef, sessionsRef, claimSettlement } from './src/store.js';
 import { syncSessions } from './src/sync.js';
-import { settleSession, settleTime } from './src/settle.js';
+import { settleSession, settleManually, settleTime } from './src/settle.js';
 import { togglClient, beeminderClient } from './src/api.js';
 import { formatDuration } from './src/progress.js';
 
@@ -118,6 +118,8 @@ export const startSession = callable(async (uid, data) => {
     settle: null,
     charge: null,
     claimedAt: null,
+    chargeRequestedAt: null,
+    measuredSec: null,
   };
   session.checkAt = settleTime(session);
   await sessionsRef(uid).doc(session.id).set(session);
@@ -131,13 +133,13 @@ export const syncNow = callable(async (uid) => {
   return { done: result.done.map((s) => s.title) };
 });
 
-/** 締切を過ぎたのに精算できていないセッションを、画面から精算し直す。 */
+/**
+ * 締切を過ぎたのに精算できていないセッションを、画面から精算し直す。
+ * 課金されたか分からないものは resolve（'charged' | 'not_charged'）で人の判断を受け取る。
+ */
 export const settleNow = callable(async (uid, data) => {
-  const id = String(data.id ?? '');
-  const session = await claimSettlement(uid, id);
-  if (!session) throw invalid('このセッションは精算できません（処理中か、精算済みです）');
-  if (Date.now() < session.due) throw invalid('締切前なので精算できません');
-  return settleSession(uid, session);
+  const resolve = data.resolve == null ? undefined : String(data.resolve);
+  return settleManually(uid, String(data.id ?? ''), resolve);
 });
 
 // ---- 締切後の自動精算 ----
