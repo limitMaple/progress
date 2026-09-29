@@ -46,16 +46,16 @@ body {
 h1 { font-size: 17px; margin: 0; }
 h2 { font-size: 13px; margin: 20px 0 8px; color: var(--muted); font-weight: 600; }
 
-input, button, .button { font: inherit; color: inherit; }
+input, select, button, .button { font: inherit; color: inherit; }
 
-input {
+input, select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 8px;
   min-width: 0;
 }
-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 button, .button {
   display: inline-block;
@@ -176,10 +176,53 @@ a { color: var(--accent); }
 .session-form label > span:first-child { color: var(--muted); }
 .row { display: flex; align-items: center; gap: 4px; }
 input.num { width: 64px; }
-.session-form input[list] { width: 100%; }
+.session-form input[list], .session-form select { width: 100%; }
 
 .hint { margin: 0; font-size: 12px; min-height: 18px; }
 .hint.error { color: var(--error); }
+
+/* ---- 開始前の確認画面 ---- */
+
+dialog.confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+dialog.confirm::backdrop { background: rgb(0 0 0 / .45); }
+dialog.confirm h2 { margin: 0 0 4px; font-size: 13px; }
+.confirm-title { margin: 0 0 14px; font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+
+/* 締切は取り違えやすいので、いちばん大きく見せる */
+.confirm-deadline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.confirm-label { color: var(--muted); font-size: 12px; width: 100%; }
+.confirm-day { font-size: 18px; font-weight: 600; }
+.confirm-clock { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+/* 今日ではない締切（時刻が過ぎていて翌日扱い、など）は色で目立たせる */
+.confirm-deadline.not-today { outline: 2px solid var(--warn); }
+.confirm-deadline.not-today .confirm-day { color: var(--warn); }
+
+.confirm-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 14px 0;
+}
+.confirm-list dt { color: var(--muted); }
+.confirm-list dd { margin: 0; overflow-wrap: anywhere; }
+
+.confirm-warning { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
 /* ---- 設定 ---- */
 
@@ -187,9 +230,6 @@ input.num { width: 64px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; }
 .settings label > span { font-weight: 600; }
 .settings input { width: 100%; }
-.settings label.check { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; }
-.settings label.check input { width: auto; justify-self: start; }
-.settings label.check small { grid-column: 2; }
 .settings input.num { width: 100px; }
 .buttons { display: flex; gap: 8px; }
 
@@ -203,5 +243,5 @@ code {
 
 /* iOS で入力欄に触れたときに拡大されないよう、スマホでは 16px にする */
 @media (max-width: 600px) {
-  input { font-size: 16px; }
+  input, select { font-size: 16px; }
 }

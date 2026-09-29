@@ -62,19 +62,15 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
       amount: session.dollars,
       // Beeminder の履歴と突き合わせられるよう、セッション ID の頭を入れておく
       note: `Toggl Ratchet: ${session.title} (${session.id.slice(0, 8)})`,
-      dryrun: settings.dryRun,
     });
     stage = 'charged';
 
     const short = `${formatDuration(trackedSec)} / ${formatDuration(session.requiredSec)}`;
-    message = settings.dryRun
-      ? `届きませんでした（${short}）。テストモードなので課金していません（$${session.dollars}）。`
-      : `届きませんでした（${short}）。$${session.dollars}を課金しました。`;
+    message = `届きませんでした（${short}）。$${session.dollars}を課金しました。`;
     charge = {
       id: String(result?.id ?? ''),
       amount: Number(result?.amount ?? session.dollars),
       at: Date.now(),
-      dryRun: settings.dryRun,
       manual: false,
     };
     return await finish(ref, attempts, 'charged', { message, charge });
@@ -164,14 +160,12 @@ export async function settleManually(
   const ref = sessionsRef(uid).doc(id);
 
   if (unresolved && resolve === 'charged') {
-    const { settings } = await loadAccount(uid);
     return finish(ref, (session.settle?.attempts ?? 0) + 1, 'charged', {
       message: `課金済みとして記録しました（Beeminderの履歴で確認, $${session.dollars}）。`,
       charge: {
         id: '',
         amount: session.dollars,
         at: Date.now(),
-        dryRun: settings.dryRun,
         manual: true,
       },
     });

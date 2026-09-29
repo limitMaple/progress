@@ -13,7 +13,7 @@ import {
 import { syncSessions } from './src/sync.js';
 import { settleSession, settleManually, settleTime } from './src/settle.js';
 import { togglClient, beeminderClient } from './src/api.js';
-import { formatDuration } from './src/progress.js';
+import { sessionTitle } from './src/progress.js';
 import type {
   ChargeResolution, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
   SettleResult, Settings, StartSessionRequest, StartSessionResponse, SyncNowResponse, Tokens,
@@ -54,7 +54,6 @@ export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSetting
   async (uid, data) => {
     const settings: Partial<Settings> = {
       defaultDollars: Math.max(1, Math.floor(Number(data.defaultDollars) || 10)),
-      dryRun: Boolean(data.dryRun),
     };
 
     // 空欄のトークンは「変更しない」
@@ -72,9 +71,17 @@ export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSetting
     if (tokens.togglToken) {
       try {
         const toggl = togglClient(tokens.togglToken);
-        const [me, tags] = await Promise.all([toggl.me(), toggl.tags()]);
+        const [me, tags, projects] = await Promise.all([toggl.me(), toggl.tags(), toggl.projects()]);
         settings.tags = [...new Set((tags ?? []).map((t) => t.name))].sort();
-        lines.push(`Toggl: 接続OK（${me.fullname || me.email}）。タグ${settings.tags.length}件を取得しました。`);
+        // 選択肢には進行中のものだけ出す（アーカイブしたプロジェクトは選べなくてよい）
+        settings.projects = (projects ?? [])
+          .filter((p) => p.active)
+          .map((p) => ({ id: p.id, name: p.name }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+        lines.push(
+          `Toggl: 接続OK（${me.fullname || me.email}）。`
+          + `プロジェクト${settings.projects.length}件、タグ${settings.tags.length}件を取得しました。`,
+        );
       } catch (err) {
         ok = false;
         lines.push((err as Error).message);
@@ -107,6 +114,7 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
   async (uid, data) => {
     const now = Date.now();
     const tag = String(data.tag ?? '').trim();
+    const projectId = data.projectId == null ? null : Number(data.projectId);
     const requiredSec = Math.floor(Number(data.requiredSec));
     const due = Math.floor(Number(data.due));
     const dollars = Math.floor(Number(data.dollars));
@@ -118,10 +126,16 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
     if (!tokens.beeminderToken || !settings.beeminderUser) {
       throw invalid('BeeminderのAPIトークンが未設定です');
     }
+    const project = projectId == null ? null : settings.projects.find((p) => p.id === projectId);
+    if (project === undefined) {
+      throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
+    }
 
     const draft: Omit<Session, 'checkAt'> = {
       id: randomUUID(),
-      title: `${tag || '作業'} ${formatDuration(requiredSec)}`,
+      title: sessionTitle({ projectName: project?.name ?? '', tag, requiredSec }),
+      projectId,
+      projectName: project?.name ?? '',
       tag,
       requiredSec,
       createdAt: now,

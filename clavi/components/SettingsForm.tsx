@@ -11,7 +11,6 @@ export default function SettingsForm({ uid }: { uid: string }) {
     const [togglToken, setTogglToken] = useState("");
     const [beeminderToken, setBeeminderToken] = useState("");
     const [dollars, setDollars] = useState("");
-    const [dryRun, setDryRun] = useState(true);
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<SaveSettingsResponse | null>(null);
 
@@ -20,7 +19,6 @@ export default function SettingsForm({ uid }: { uid: string }) {
     useEffect(() => {
         if (!settings) return;
         setDollars(String(settings.defaultDollars));
-        setDryRun(settings.dryRun);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);
 
@@ -33,7 +31,6 @@ export default function SettingsForm({ uid }: { uid: string }) {
                 togglToken: togglToken.trim(),
                 beeminderToken: beeminderToken.trim(),
                 defaultDollars: Math.max(1, Math.floor(Number(dollars) || 10)),
-                dryRun,
             }));
             setTogglToken("");
             setBeeminderToken("");
@@ -63,7 +60,8 @@ export default function SettingsForm({ uid }: { uid: string }) {
                     />
                     <small className="muted">
                         <a href="https://track.toggl.com/profile" target="_blank" rel="noopener">Togglのプロフィール</a>
-                        の「API Token」からコピーします。
+                        の「API Token」からコピーします。保存するとプロジェクトとタグの一覧を取り直します
+                        （Togglで増やしたときは、トークンを空欄のまま保存してください）。
                     </small>
                 </label>
 
@@ -90,15 +88,6 @@ export default function SettingsForm({ uid }: { uid: string }) {
                         type="number" min="1" step="1" className="num"
                         value={dollars} onChange={(e) => setDollars(e.target.value)}
                     />
-                </label>
-
-                <label className="check">
-                    <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-                    <span>テストモード（実際には課金しない）</span>
-                    <small className="muted">
-                        Beeminderの <code>dryrun</code> を使い、課金されたときと同じ流れを試せます。
-                        本番で使うときはオフにしてください。
-                    </small>
                 </label>
 
                 <div className="buttons">

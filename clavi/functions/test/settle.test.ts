@@ -61,14 +61,16 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
 let seq = 0;
 
 /** 新しいユーザーとセッションを 1 件作る。テストごとに別の uid にして干渉させない。 */
-async function setup(overrides: Partial<Session> = {}, { dryRun = false } = {}) {
+async function setup(overrides: Partial<Session> = {}) {
   const uid = `user${++seq}-${Date.now()}`;
   const now = Date.now();
-  await userRef(uid).set({ beeminderUser: 'alice', dryRun });
+  await userRef(uid).set({ beeminderUser: 'alice' });
   await secretRef(uid).set({ togglToken: 'toggl', beeminderToken: 'bee' });
   const session: Session = {
     id: `session-${seq}-abcdefgh`,
-    title: 'study 1時間00分',
+    title: '作業 1時間00分',
+    projectId: null,
+    projectName: '',
     tag: '',
     requiredSec: 3600,
     createdAt: now - 2 * HOUR,
@@ -97,11 +99,12 @@ async function read(uid: string, id: string): Promise<Session> {
 }
 
 /** start から minutes 分の、止まった記録。 */
-function entry(start: number, minutes: number): TimeEntry {
+function entry(start: number, minutes: number, projectId: number | null = null): TimeEntry {
   return {
     start: new Date(start).toISOString(),
     stop: new Date(start + minutes * MIN).toISOString(),
     duration: minutes * 60,
+    project_id: projectId,
     tags: [],
   };
 }
@@ -118,21 +121,11 @@ test('未達なら 1 回だけ課金して charged にする', async () => {
   assert.equal(charges.length, 1);
   assert.equal(charges[0].amount, '10');
   assert.equal(charges[0].user_id, 'alice');
-  assert.equal(charges[0].dryrun, undefined);
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'charged');
   assert.equal(saved.charge?.id, 'ch_1');
   assert.equal(saved.checkAt, null);
   assert.equal(saved.claimedAt, null);
-});
-
-test('テストモードなら dryrun を付けて呼ぶ', async () => {
-  const { uid, session } = await setup({}, { dryRun: true });
-
-  await settleSession(uid, session);
-
-  assert.equal(charges[0].dryrun, 'true');
-  assert.equal((await read(uid, session.id)).charge?.dryRun, true);
 });
 
 test('締切までに達していれば課金せず done にする', async () => {
@@ -273,6 +266,27 @@ test('締切後の同期では、後から足した記録で達成にならな�
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'active');
   assert.equal(saved.trackedSec, 70 * 60);
+});
+
+test('プロジェクトを指定したセッションは、そのプロジェクトの記録だけで判定する', async () => {
+  const { uid, session } = await setup({ projectId: 7, projectName: '資格' });
+  togglEntries = [entry(session.createdAt, 30, 7), entry(session.createdAt + 30 * MIN, 40, 8)];
+
+  const result = await settleSession(uid, session);
+
+  assert.equal(result.status, 'charged');
+  assert.equal((await read(uid, session.id)).measuredSec, 30 * 60);
+});
+
+test('プロジェクト指定ができる前のセッション（項目なし）は、すべての記録で判定する', async () => {
+  const { uid, session } = await setup();
+  const { projectId: _projectId, projectName: _projectName, ...legacy } = session;
+  await sessionsRef(uid).doc(session.id).set(legacy as Session);
+  togglEntries = [entry(session.createdAt, 30, 7), entry(session.createdAt + 30 * MIN, 40, 8)];
+
+  const result = await settleSession(uid, legacy as Session);
+
+  assert.equal(result.status, 'done');
 });
 
 test('締切前の同期では、達していれば done にする', async () => {

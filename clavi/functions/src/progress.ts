@@ -4,16 +4,18 @@ import type { TimeEntry } from './model.js';
 
 /**
  * Toggl の time entry のうち、[from, to) に重なる部分の合計秒数を返す。
- * tag を指定した場合は、そのタグが付いた記録だけを数える。
+ * projectId を指定した場合はそのプロジェクトの記録だけ、tag を指定した場合はそのタグが付いた
+ * 記録だけを数える。両方指定したら両方を満たす記録だけ。
  * 計測中の記録（stop が null）は now まで続いているものとして扱う。
  */
 export function trackedSeconds(
   entries: readonly TimeEntry[],
-  { from, to, tag }: { from: number; to: number; tag?: string },
+  { from, to, tag, projectId }: { from: number; to: number; tag?: string; projectId?: number | null },
   now: number,
 ): number {
   let totalMs = 0;
   for (const entry of entries) {
+    if (projectId != null && entry.project_id !== projectId) continue;
     if (tag && !(entry.tags ?? []).includes(tag)) continue;
     const start = Date.parse(entry.start);
     const stop = entry.stop
@@ -44,6 +46,14 @@ export function defaultDeadline(now: number, minMs: number, stepMin = 10): strin
   const step = stepMin * 60 * 1000;
   const d = new Date(Math.ceil((now + minMs) / step) * step);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** セッションの名前。「資格 / 過去問 2時間00分」「作業 45分」の形。確認画面とサーバーで同じものを使う。 */
+export function sessionTitle(
+  { projectName, tag, requiredSec }: { projectName: string; tag: string; requiredSec: number },
+): string {
+  const target = [projectName, tag].filter(Boolean).join(' / ') || '作業';
+  return `${target} ${formatDuration(requiredSec)}`;
 }
 
 /** 秒数を「1時間05分」「45分」の形にする（分未満は切り捨て）。 */

@@ -44,7 +44,13 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
     // 締切を過ぎた分は数えないので、締切後は値が動かない
     const trackedSec = trackedSeconds(
       entries,
-      { from: session.createdAt, to: Math.min(now, session.due), tag: session.tag },
+      {
+        from: session.createdAt,
+        to: Math.min(now, session.due),
+        tag: session.tag,
+        // プロジェクト指定ができる前に作ったセッションには項目が無い
+        projectId: session.projectId ?? null,
+      },
       now,
     );
     // 締切後は達成にしない。Toggl には過去の時刻で記録を足せるので、締切後に足した記録で

@@ -68,12 +68,19 @@ export interface TogglTag {
   name: string;
 }
 
+export interface TogglProjectEntry {
+  id: number;
+  name: string;
+  active: boolean;
+}
+
 export function togglClient(token: string) {
   const headers = { Authorization: `Basic ${btoa(`${token}:api_token`)}` };
   const get = <T>(path: string) => send<T>('Toggl', `${TOGGL_BASE}${path}`, { headers });
   return {
     me: () => get<TogglMe>('/me'),
     tags: () => get<TogglTag[] | null>('/me/tags'),
+    projects: () => get<TogglProjectEntry[] | null>('/me/projects'),
     /** start / end は RFC3339 文字列 */
     timeEntries: (start: string, end: string) => {
       const q = new URLSearchParams({ start_date: start, end_date: end });
@@ -108,20 +115,8 @@ export function beeminderClient(token: string) {
   };
   return {
     me: () => call<BeeminderMe>('GET', '/users/me.json'),
-    /**
-     * 自分に課金する。amount は米ドルで 1.00 以上。
-     * dryrun を渡すと課金されず、結果の形だけが返る。
-     */
-    charge: ({ user, amount, note, dryrun }: {
-      user: string;
-      amount: number;
-      note: string;
-      dryrun: boolean;
-    }) => call<BeeminderCharge>('POST', '/charges.json', {
-      user_id: user,
-      amount: String(amount),
-      note,
-      ...(dryrun ? { dryrun: 'true' } : {}),
-    }),
+    /** 自分に課金する。amount は米ドルで 1.00 以上。 */
+    charge: ({ user, amount, note }: { user: string; amount: number; note: string }) =>
+      call<BeeminderCharge>('POST', '/charges.json', { user_id: user, amount: String(amount), note }),
   };
 }

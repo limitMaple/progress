@@ -8,10 +8,10 @@
 
 export interface Settings {
   defaultDollars: number;
-  /** true なら Beeminder の dryrun で呼び、実際には課金しない */
-  dryRun: boolean;
   /** Toggl のタグ名（入力補完用） */
   tags: string[];
+  /** Toggl の進行中のプロジェクト（選択肢用） */
+  projects: TogglProject[];
   hasTogglToken: boolean;
   hasBeeminderToken: boolean;
   /** 課金 API の user_id に使う */
@@ -20,13 +20,17 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   defaultDollars: 10,
-  // 本当に課金してよいと決めるまでは、Beeminder の dryrun で試せるようにしておく
-  dryRun: true,
   tags: [],
+  projects: [],
   hasTogglToken: false,
   hasBeeminderToken: false,
   beeminderUser: '',
 };
+
+export interface TogglProject {
+  id: number;
+  name: string;
+}
 
 export interface Tokens {
   togglToken: string;
@@ -48,7 +52,6 @@ export interface ChargeRecord {
   id: string;
   amount: number;
   at: number;
-  dryRun: boolean;
   /** 人が Beeminder の履歴を見て記録したもの */
   manual: boolean;
 }
@@ -57,7 +60,11 @@ export interface ChargeRecord {
 export interface Session {
   id: string;
   title: string;
-  /** 数える Toggl のタグ。空ならすべての記録 */
+  /** 数える Toggl のプロジェクト。null ならプロジェクトで絞らない */
+  projectId: number | null;
+  /** 表示用。開始したときのプロジェクト名 */
+  projectName: string;
+  /** 数える Toggl のタグ。空ならタグで絞らない（プロジェクトと両方あれば両方を満たす記録だけ） */
   tag: string;
   requiredSec: number;
   createdAt: number;
@@ -87,6 +94,7 @@ export interface TimeEntry {
   stop: string | null;
   /** 計測中は負の値 */
   duration: number;
+  project_id: number | null;
   tags: string[] | null;
 }
 
@@ -98,7 +106,6 @@ export interface SaveSettingsRequest {
   /** 空欄なら変更しない */
   beeminderToken: string;
   defaultDollars: number;
-  dryRun: boolean;
 }
 
 export interface SaveSettingsResponse {
@@ -107,6 +114,7 @@ export interface SaveSettingsResponse {
 }
 
 export interface StartSessionRequest {
+  projectId: number | null;
   tag: string;
   requiredSec: number;
   due: number;

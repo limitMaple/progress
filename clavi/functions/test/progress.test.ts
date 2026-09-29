@@ -1,17 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  trackedSeconds, resolveDeadline, defaultDeadline, formatDuration, formatDay, formatDeadline,
+  trackedSeconds, resolveDeadline, defaultDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from '../src/progress.js';
 import type { TimeEntry } from '../src/model.js';
 
 const at = (hhmm: string) => new Date(`2026-09-16T${hhmm}:00`).getTime();
 const iso = (hhmm: string) => new Date(at(hhmm)).toISOString();
 
-function entry(start: string, stop: string | null, tags: string[] = []): TimeEntry {
+function entry(start: string, stop: string | null, tags: string[] = [], project_id: number | null = null): TimeEntry {
   return stop
-    ? { start: iso(start), stop: iso(stop), duration: (at(stop) - at(start)) / 1000, tags }
-    : { start: iso(start), stop: null, duration: -at(start) / 1000, tags };
+    ? { start: iso(start), stop: iso(stop), duration: (at(stop) - at(start)) / 1000, project_id, tags }
+    : { start: iso(start), stop: null, duration: -at(start) / 1000, project_id, tags };
 }
 
 test('セッション開始前の分は数えない', () => {
@@ -30,6 +30,27 @@ test('タグ指定があれば他のタグは数えない', () => {
   const range = { from: at('10:00'), to: at('12:00') };
   assert.equal(trackedSeconds(entries, { ...range, tag: 'study' }, at('12:00')), 45 * 60);
   assert.equal(trackedSeconds(entries, { ...range, tag: '' }, at('12:00')), 80 * 60);
+});
+
+test('プロジェクト指定があれば他のプロジェクトは数えない', () => {
+  const entries = [
+    entry('10:00', '10:30', [], 1),
+    entry('10:30', '11:00', [], 2),
+    entry('11:00', '11:10'),
+  ];
+  const range = { from: at('10:00'), to: at('12:00') };
+  assert.equal(trackedSeconds(entries, { ...range, projectId: 1 }, at('12:00')), 30 * 60);
+  assert.equal(trackedSeconds(entries, { ...range, projectId: null }, at('12:00')), 70 * 60);
+});
+
+test('プロジェクトとタグの両方を指定したら、両方を満たす記録だけ数える', () => {
+  const entries = [
+    entry('10:00', '10:30', ['study'], 1),
+    entry('10:30', '11:00', ['work'], 1),
+    entry('11:00', '11:20', ['study'], 2),
+  ];
+  const range = { from: at('10:00'), to: at('12:00') };
+  assert.equal(trackedSeconds(entries, { ...range, projectId: 1, tag: 'study' }, at('12:00')), 30 * 60);
 });
 
 test('計測中の記録は now までを数える', () => {
@@ -52,6 +73,12 @@ test('締切の時刻が過ぎていれば翌日になる', () => {
 test('締切の初期値は10分単位に切り上げる', () => {
   assert.equal(defaultDeadline(at('10:03'), 3 * 3600000), '13:10');
   assert.equal(defaultDeadline(at('10:00'), 3 * 3600000), '13:00');
+});
+
+test('セッションの名前', () => {
+  assert.equal(sessionTitle({ projectName: '資格', tag: '過去問', requiredSec: 7200 }), '資格 / 過去問 2時間00分');
+  assert.equal(sessionTitle({ projectName: '資格', tag: '', requiredSec: 2700 }), '資格 45分');
+  assert.equal(sessionTitle({ projectName: '', tag: '', requiredSec: 2700 }), '作業 45分');
 });
 
 test('表示の整形', () => {

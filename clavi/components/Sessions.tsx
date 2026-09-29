@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { signOut } from "firebase/auth";
 import { deleteDoc, doc } from "firebase/firestore";
 import { auth, db, startSession, syncNow, settleNow } from "@/lib/firebase";
 import { useSessions, useSettings } from "@/lib/account";
 import {
-    resolveDeadline, defaultDeadline, formatDuration, formatDay, formatDeadline,
+    resolveDeadline, defaultDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from "@/functions/src/progress";
-import type { ChargeResolution, Session, SessionStatus } from "@/functions/src/model";
+import type {
+    ChargeResolution, Session, SessionStatus, StartSessionRequest, TogglProject,
+} from "@/functions/src/model";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -23,6 +25,15 @@ function useNow() {
         return () => clearInterval(id);
     }, []);
     return now;
+}
+
+/** 何の記録を数えるか。「プロジェクト「資格」・タグ「過去問」」「すべての記録」の形。 */
+function targetLabel({ projectName, tag }: { projectName?: string; tag: string }): string {
+    const parts = [
+        projectName ? `プロジェクト「${projectName}」` : "",
+        tag ? `タグ「${tag}」` : "",
+    ].filter(Boolean);
+    return parts.length ? parts.join("・") : "すべての記録";
 }
 
 export default function Sessions({ uid }: { uid: string }) {
@@ -70,11 +81,6 @@ export default function Sessions({ uid }: { uid: string }) {
                     APIトークンが未設定です。<Link href="/settings">設定を開く</Link>
                 </p>
             )}
-            {settings?.dryRun && (
-                <p className="notice">
-                    テストモードです。失敗しても課金されません。<Link href="/settings">設定を開く</Link>
-                </p>
-            )}
             {message.text && <p className={`notice ${message.kind}`}>{message.text}</p>}
 
             <section>
@@ -97,9 +103,9 @@ export default function Sessions({ uid }: { uid: string }) {
 
             {settings && (
                 <NewSessionForm
+                    projects={settings.projects}
                     tags={settings.tags}
                     defaultDollars={settings.defaultDollars}
-                    dryRun={settings.dryRun}
                     disabled={busy || !hasTokens}
                     setBusy={setBusy}
                     setMessage={setMessage}
@@ -111,25 +117,31 @@ export default function Sessions({ uid }: { uid: string }) {
 
 // ---- 新しいセッション ----
 
-function NewSessionForm({ tags, defaultDollars, dryRun, disabled, setBusy, setMessage }: {
+/** 確認画面に出す、開始しようとしている内容。締切は確認画面を開いた時点で決める。 */
+type Draft = StartSessionRequest & { projectName: string };
+
+function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, setMessage }: {
+    projects: TogglProject[];
     tags: string[];
     defaultDollars: number;
-    dryRun: boolean;
     disabled: boolean;
     setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;
 }) {
+    const [projectId, setProjectId] = useState("");
     const [tag, setTag] = useState("");
     const [deadline, setDeadline] = useState(() => defaultDeadline(Date.now(), 3 * HOUR));
     const [hours, setHours] = useState("2");
     const [minutes, setMinutes] = useState("0");
     const [dollars, setDollars] = useState(String(defaultDollars));
+    const [draft, setDraft] = useState<Draft | null>(null);
     useNow();
 
     const form = readForm();
 
     function readForm() {
         const now = Date.now();
+        const project = projects.find((p) => String(p.id) === projectId) ?? null;
         const requiredSec = (Number(hours) || 0) * 3600 + (Number(minutes) || 0) * 60;
         const amount = Math.floor(Number(dollars) || 0);
         const due = deadline ? resolveDeadline(deadline, now) : null;
@@ -141,33 +153,45 @@ function NewSessionForm({ tags, defaultDollars, dryRun, disabled, setBusy, setMe
         else if (due - now < requiredSec * 1000) {
             error = `締切まで残り${formatDuration((due - now) / 1000)}しかありません`;
         }
-        return { now, tag: tag.trim(), requiredSec, dollars: amount, due, error };
+        return { now, project, tag: tag.trim(), requiredSec, dollars: amount, due, error };
     }
 
-    async function start(event: FormEvent) {
+    /** 開始ボタン。すぐには始めず、確認画面を開く。 */
+    function review(event: FormEvent) {
         event.preventDefault();
         const form = readForm();
         if (disabled || form.error || !form.due) return;
+        setDraft({
+            projectId: form.project?.id ?? null,
+            projectName: form.project?.name ?? "",
+            tag: form.tag,
+            requiredSec: form.requiredSec,
+            due: form.due,
+            dollars: form.dollars,
+        });
+    }
 
-        const title = `${form.tag || "作業"} ${formatDuration(form.requiredSec)}`;
-        const ok = confirm(
-            `「${title}」を ${formatDeadline(form.due, form.now)} までにやります。`
-            + `達成できなければ、Beeminderで$${form.dollars}が課金されます。よろしいですか？`
-            + (dryRun ? "\n（今はテストモードなので、実際には課金されません）" : ""),
-        );
-        if (!ok) return;
-
+    async function start(draft: Draft) {
+        // 確認画面を開いたまま時間が経つと、作業時間が締切に収まらなくなることがある
+        if (draft.due - Date.now() < draft.requiredSec * 1000) {
+            setDraft(null);
+            setMessage({ text: "確認している間に、締切までに作業時間が収まらなくなりました。直してください。", kind: "error" });
+            return;
+        }
         setBusy(true);
         setMessage({ text: "", kind: "" });
         try {
             await startSession({
-                tag: form.tag,
-                requiredSec: form.requiredSec,
-                due: form.due,
-                dollars: form.dollars,
+                projectId: draft.projectId,
+                tag: draft.tag,
+                requiredSec: draft.requiredSec,
+                due: draft.due,
+                dollars: draft.dollars,
             });
+            setDraft(null);
             setMessage({ text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" });
         } catch (err) {
+            setDraft(null);
             setMessage({ text: (err as Error).message, kind: "error" });
         } finally {
             setBusy(false);
@@ -177,17 +201,25 @@ function NewSessionForm({ tags, defaultDollars, dryRun, disabled, setBusy, setMe
     const hint = form.error || !form.due
         ? form.error
         : `締切 ${formatDeadline(form.due, form.now)}（残り${formatDuration((form.due - form.now) / 1000)}）`
-            + `までに${form.tag ? `「${form.tag}」を` : ""}${formatDuration(form.requiredSec)}`;
+            + `までに${targetLabel({ projectName: form.project?.name, tag: form.tag })}を${formatDuration(form.requiredSec)}`;
 
     return (
         <section>
             <h2>新しいセッション</h2>
-            <form className="session-form" onSubmit={start} noValidate>
+            <form className="session-form" onSubmit={review} noValidate>
+                <label>
+                    <span>プロジェクト</span>
+                    <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                        <option value="">指定なし</option>
+                        {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                    </select>
+                </label>
+
                 <label>
                     <span>タグ</span>
                     <input
                         list="tag-options"
-                        placeholder="空欄ならすべての記録"
+                        placeholder="空欄ならタグで絞らない"
                         autoComplete="off"
                         value={tag}
                         onChange={(e) => setTag(e.target.value)}
@@ -231,10 +263,78 @@ function NewSessionForm({ tags, defaultDollars, dryRun, disabled, setBusy, setMe
 
                 <p className={`hint ${form.error ? "error" : ""}`}>{hint}</p>
                 <button type="submit" className="primary" disabled={disabled || Boolean(form.error)}>
-                    {form.dollars >= 1 ? `開始（失敗したら$${form.dollars}）` : "開始"}
+                    内容を確認する
                 </button>
             </form>
+
+            {draft && (
+                <StartConfirmDialog
+                    draft={draft}
+                    busy={disabled}
+                    onBack={() => setDraft(null)}
+                    onStart={() => start(draft)}
+                />
+            )}
         </section>
+    );
+}
+
+const WEEKDAYS = "日月火水木金土";
+
+/**
+ * 開始前の確認画面。開始したあとは内容を変えられないので、締切を取り違えていないか
+ * （特に、時刻が過ぎていて翌日扱いになっていないか）をここで大きく見せる。
+ */
+function StartConfirmDialog({ draft, busy, onBack, onStart }: {
+    draft: Draft;
+    busy: boolean;
+    onBack: () => void;
+    onStart: () => void;
+}) {
+    const ref = useRef<HTMLDialogElement>(null);
+    useEffect(() => {
+        ref.current?.showModal();
+    }, []);
+
+    const now = Date.now();
+    const d = new Date(draft.due);
+    const day = formatDay(draft.due, now);
+    const date = `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
+    const clock = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+    return (
+        // Esc で閉じたときも「戻って直す」と同じ扱いにする
+        <dialog ref={ref} className="confirm" onCancel={onBack} aria-labelledby="confirm-title">
+            <h2 id="confirm-title">この内容で開始しますか？</h2>
+            <p className="confirm-title">{sessionTitle(draft)}</p>
+
+            <div className={`confirm-deadline ${day === "今日" ? "" : "not-today"}`}>
+                <span className="confirm-label">締切</span>
+                <span className="confirm-day">{day === "今日" ? "今日" : `${day === "明日" ? "明日 " : ""}${date}`}</span>
+                <span className="confirm-clock">{clock}</span>
+                <span className="muted">残り{formatDuration((draft.due - now) / 1000)}</span>
+            </div>
+
+            <dl className="confirm-list">
+                <dt>作業時間</dt>
+                <dd>{formatDuration(draft.requiredSec)}</dd>
+                <dt>数える記録</dt>
+                <dd>{targetLabel(draft)}</dd>
+                <dt>金額</dt>
+                <dd>${draft.dollars}</dd>
+            </dl>
+
+            <p className="confirm-warning">
+                開始したあとは変更できません。締切までに届かなければ、Beeminder で ${draft.dollars} が課金されます。
+            </p>
+
+            <div className="confirm-buttons">
+                <button type="button" onClick={onBack} disabled={busy} autoFocus>戻って直す</button>
+                <button type="button" className="primary" onClick={onStart} disabled={busy}>
+                    {busy ? "開始しています…" : "この内容で開始"}
+                </button>
+            </div>
+        </dialog>
     );
 }
 
@@ -291,8 +391,7 @@ function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
             <div className="deadline muted">
                 {`締切 ${formatDeadline(session.due, now)}`}
                 {session.status === "active" && remainingTime > 0 ? `（残り${formatDuration(remainingTime / 1000)}）` : ""}
-                {` ・ $${session.dollars}`}
-                {session.tag ? ` ・ タグ「${session.tag}」` : " ・ タグ指定なし"}
+                {` ・ $${session.dollars} ・ ${targetLabel(session)}`}
             </div>
             <div className="bar"><div className="fill" style={{ width: `${ratio * 100}%` }} /></div>
             <div className="session-foot">
