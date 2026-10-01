@@ -30,15 +30,16 @@ export function trackedSeconds(
 }
 
 /**
- * "HH:MM" を now 以降で最も近いその時刻に変換する（ms）。
- * 今日のその時刻を過ぎていれば翌日扱い。実行環境のタイムゾーンで解釈するので、ブラウザで呼ぶこと。
+ * 日付 "YYYY-MM-DD" と時刻 "HH:MM" を時刻（ms）にする。時刻が空ならその日の 0:00。
+ * 日付が空、または形が正しくなければ null。
+ * 実行環境のタイムゾーンで解釈するので、ブラウザで呼ぶこと（Functions は UTC で動く）。
  */
-export function resolveDeadline(hhmm: string, now: number): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  const d = new Date(now);
-  d.setHours(h, m, 0, 0);
-  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-  return d.getTime();
+export function localDateTime(date: string, time: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (time && !/^\d{2}:\d{2}$/.test(time)) return null;
+  // 時差の無い "YYYY-MM-DDTHH:MM" は、実行環境のタイムゾーンの時刻として解釈される
+  const ms = new Date(`${date}T${time || '00:00'}`).getTime();
+  return Number.isNaN(ms) ? null : ms;
 }
 
 /** セッションの名前。「資格 / 過去問 2時間00分」「作業 45分」の形。確認画面とサーバーで同じものを使う。 */

@@ -14,6 +14,7 @@ import { syncSessions } from './src/sync.js';
 import { settleSession, settleManually, settleTime } from './src/settle.js';
 import { togglClient, beeminderClient } from './src/api.js';
 import { sessionTitle } from './src/progress.js';
+import { MAX_START_PAST_MS } from './src/model.js';
 import type {
   ChargeResolution, LastInput, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
   SettleResult, Settings, StartSessionRequest, StartSessionResponse, SyncNowResponse, Tokens,
@@ -114,11 +115,15 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
     const tag = String(data.tag ?? '').trim();
     const projectId = data.projectId == null ? null : Number(data.projectId);
     const requiredSec = Math.floor(Number(data.requiredSec));
+    // 数え始める時刻を指定しなければ、開始した時刻から数える
+    const startAt = data.startAt == null ? now : Math.floor(Number(data.startAt));
     const due = Math.floor(Number(data.due));
     const dollars = Math.floor(Number(data.dollars));
     if (!(requiredSec > 0)) throw invalid('作業時間を入力してください');
     if (!(dollars >= 1)) throw invalid('金額は$1以上にしてください');
-    if (!(due - now >= requiredSec * 1000)) throw invalid('締切までに作業時間が足りません');
+    if (!(due > now)) throw invalid('締切が過ぎています');
+    if (!(startAt >= now - MAX_START_PAST_MS)) throw invalid('カウント開始は30日前までにしてください');
+    if (!(due - startAt >= requiredSec * 1000)) throw invalid('カウント開始から締切までが、作業時間より短くなっています');
 
     const { settings, tokens } = await loadAccount(uid);
     if (!tokens.beeminderToken || !settings.beeminderUser) {
@@ -137,6 +142,7 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
       tag,
       requiredSec,
       createdAt: now,
+      startAt,
       due,
       dollars,
       status: 'active',
@@ -167,12 +173,21 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
  * 次に入力欄を開いたときの初期値にするためだけのもので、何かを判定することはない。
  */
 export const saveLastInput = onAuthenticatedCall<LastInput, void>(async (uid, data) => {
-  const deadline = String(data.deadline ?? '');
   const projectId = data.projectId == null ? null : clampInt(data.projectId, 0, Number.MAX_SAFE_INTEGER, 0);
+  /** 形が合っていればそのまま、合っていなければ空欄 */
+  const pick = (value: unknown, pattern: RegExp) => {
+    const s = String(value ?? '');
+    return pattern.test(s) ? s : '';
+  };
+  const DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const TIME = /^\d{2}:\d{2}$/;
   const lastInput: LastInput = {
     projectId: projectId || null,
     tag: String(data.tag ?? '').slice(0, 100),
-    deadline: /^\d{2}:\d{2}$/.test(deadline) ? deadline : '',
+    startDate: pick(data.startDate, DATE),
+    startTime: pick(data.startTime, TIME),
+    deadlineDate: pick(data.deadlineDate, DATE),
+    deadlineTime: pick(data.deadlineTime, TIME),
     requiredSec: clampInt(data.requiredSec, 0, 99 * 3600, 0),
     dollars: clampInt(data.dollars, 0, 100_000, 0),
   };

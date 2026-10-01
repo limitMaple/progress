@@ -7,8 +7,9 @@ import { db, startSession, syncNow, settleNow, saveLastInput } from "@/lib/fireb
 import { useSessions, useSettings } from "@/lib/account";
 import { useSignedInUser } from "@/components/AuthGate";
 import {
-    resolveDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
+    localDateTime, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from "@/functions/src/progress";
+import { MAX_START_PAST_MS } from "@/functions/src/model";
 import type {
     ChargeResolution, LastInput, Session, SessionStatus, Settings, StartSessionRequest, TogglProject,
 } from "@/functions/src/model";
@@ -110,14 +111,17 @@ export default function Sessions() {
 
 // ---- 新しいセッション ----
 
-/** 確認画面に出す、開始しようとしている内容。締切は確認画面を開いた時点で決める。 */
+/** 確認画面に出す、開始しようとしている内容。 */
 type Draft = StartSessionRequest & { projectName: string };
 
-/** 入力欄の値。どれも input / select の value なので文字列で持つ。 */
+/** 入力欄の値。どれも input / select の value なので文字列で持つ（日付は "YYYY-MM-DD"、時刻は "HH:MM"）。 */
 type FormValues = {
     projectId: string;
     tag: string;
-    deadline: string;
+    startDate: string;
+    startTime: string;
+    deadlineDate: string;
+    deadlineTime: string;
     hours: string;
     minutes: string;
     dollars: string;
@@ -134,7 +138,10 @@ function initialValues(settings: Settings): FormValues {
     return {
         projectId,
         tag: last?.tag ?? "",
-        deadline: last?.deadline ?? "",
+        startDate: last?.startDate ?? "",
+        startTime: last?.startTime ?? "",
+        deadlineDate: last?.deadlineDate ?? "",
+        deadlineTime: last?.deadlineTime ?? "",
         hours: String(Math.floor(requiredSec / 3600)),
         minutes: String(Math.floor((requiredSec % 3600) / 60)),
         dollars: String(last?.dollars ?? 0),
@@ -145,7 +152,10 @@ function toLastInput(values: FormValues): LastInput {
     return {
         projectId: values.projectId ? Number(values.projectId) : null,
         tag: values.tag,
-        deadline: values.deadline,
+        startDate: values.startDate,
+        startTime: values.startTime,
+        deadlineDate: values.deadlineDate,
+        deadlineTime: values.deadlineTime,
         requiredSec: (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60,
         dollars: Math.floor(Number(values.dollars) || 0),
     };
@@ -217,16 +227,22 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
         const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
         const requiredSec = (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60;
         const amount = Math.floor(Number(values.dollars) || 0);
-        const due = values.deadline ? resolveDeadline(values.deadline, now) : null;
+        // カウント開始は空欄なら null（開始した時刻から数える）。日付だけならその日の 0:00
+        const startAt = values.startDate ? localDateTime(values.startDate, values.startTime) : null;
+        const due = values.deadlineTime ? localDateTime(values.deadlineDate, values.deadlineTime) : null;
+        const countFrom = startAt ?? now;
 
         let error = "";
-        if (!due) error = "締切を入力してください";
+        if (values.startTime && !values.startDate) error = "カウント開始の日付を入力してください";
+        else if (!due) error = "締切の日付と時刻を入力してください";
+        else if (due <= now) error = "締切が過ぎています";
+        else if (startAt != null && startAt < now - MAX_START_PAST_MS) error = "カウント開始は30日前までにしてください";
         else if (requiredSec <= 0) error = "作業時間を入力してください";
         else if (amount < 1) error = "金額は$1以上にしてください";
-        else if (due - now < requiredSec * 1000) {
-            error = `締切まで残り${formatDuration((due - now) / 1000)}しかありません`;
+        else if (due - countFrom < requiredSec * 1000) {
+            error = `カウント開始から締切まで${formatDuration((due - countFrom) / 1000)}しかありません`;
         }
-        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, due, error };
+        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, startAt, due, error };
     }
 
     /** 開始ボタン。すぐには始めず、確認画面を開く。 */
@@ -239,6 +255,7 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
             projectName: form.project?.name ?? "",
             tag: form.tag,
             requiredSec: form.requiredSec,
+            startAt: form.startAt,
             due: form.due,
             dollars: form.dollars,
         });
@@ -246,7 +263,8 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
 
     async function start(draft: Draft) {
         // 確認画面を開いたまま時間が経つと、作業時間が締切に収まらなくなることがある
-        if (draft.due - Date.now() < draft.requiredSec * 1000) {
+        const now = Date.now();
+        if (draft.due <= now || draft.due - (draft.startAt ?? now) < draft.requiredSec * 1000) {
             setDraft(null);
             setMessage({ text: "確認している間に、締切までに作業時間が収まらなくなりました。直してください。", kind: "error" });
             return;
@@ -258,6 +276,7 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
                 projectId: draft.projectId,
                 tag: draft.tag,
                 requiredSec: draft.requiredSec,
+                startAt: draft.startAt,
                 due: draft.due,
                 dollars: draft.dollars,
             });
@@ -273,8 +292,9 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
 
     const hint = form.error || !form.due
         ? form.error
-        : `締切 ${formatDeadline(form.due, form.now)}（残り${formatDuration((form.due - form.now) / 1000)}）`
-            + `までに${targetLabel({ projectName: form.project?.name, tag: form.tag })}を${formatDuration(form.requiredSec)}`;
+        : `${form.startAt == null ? "開始した時刻" : formatDeadline(form.startAt, form.now)}から`
+            + `締切 ${formatDeadline(form.due, form.now)}（残り${formatDuration((form.due - form.now) / 1000)}）までに`
+            + `${targetLabel({ projectName: form.project?.name, tag: form.tag })}を${formatDuration(form.requiredSec)}`;
 
     return (
         <section>
@@ -303,9 +323,19 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
                 </datalist>
 
                 <label>
+                    <span>カウント開始</span>
+                    <span className="row">
+                        <input type="date" value={values.startDate} onChange={change("startDate")} />
+                        <input type="time" value={values.startTime} onChange={change("startTime")} />
+                    </span>
+                </label>
+                <p className="field-note muted">空欄なら開始した時刻から数えます。日付だけなら、その日の 0:00 から。</p>
+
+                <label>
                     <span>締切</span>
                     <span className="row">
-                        <input type="time" required value={values.deadline} onChange={change("deadline")} />
+                        <input type="date" required value={values.deadlineDate} onChange={change("deadlineDate")} />
+                        <input type="time" required value={values.deadlineTime} onChange={change("deadlineTime")} />
                         <span className="muted">{form.due ? formatDay(form.due, form.now) : ""}</span>
                     </span>
                 </label>
@@ -354,9 +384,21 @@ function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage
 
 const WEEKDAYS = "日月火水木金土";
 
+/** 「9/30（火）」の形。 */
+function formatDate(ms: number): string {
+    const d = new Date(ms);
+    return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
+}
+
+/** 「9:05」の形。 */
+function formatClock(ms: number): string {
+    const d = new Date(ms);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 /**
- * 開始前の確認画面。開始したあとは内容を変えられないので、締切を取り違えていないか
- * （特に、時刻が過ぎていて翌日扱いになっていないか）をここで大きく見せる。
+ * 開始前の確認画面。開始したあとは内容を変えられないので、締切とカウント開始を
+ * 取り違えていないか（日付を 1 日ずらしていないか、など）をここで大きく見せる。
  */
 function StartConfirmDialog({ draft, busy, onBack, onStart }: {
     draft: Draft;
@@ -370,10 +412,7 @@ function StartConfirmDialog({ draft, busy, onBack, onStart }: {
     }, []);
 
     const now = Date.now();
-    const d = new Date(draft.due);
     const day = formatDay(draft.due, now);
-    const date = `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
-    const clock = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 
     return (
         // Esc で閉じたときも「戻って直す」と同じ扱いにする
@@ -383,12 +422,18 @@ function StartConfirmDialog({ draft, busy, onBack, onStart }: {
 
             <div className={`confirm-deadline ${day === "今日" ? "" : "not-today"}`}>
                 <span className="confirm-label">締切</span>
-                <span className="confirm-day">{day === "今日" ? "今日" : `${day === "明日" ? "明日 " : ""}${date}`}</span>
-                <span className="confirm-clock">{clock}</span>
+                <span className="confirm-day">{day === "今日" ? "今日" : `${day === "明日" ? "明日 " : ""}${formatDate(draft.due)}`}</span>
+                <span className="confirm-clock">{formatClock(draft.due)}</span>
                 <span className="muted">残り{formatDuration((draft.due - now) / 1000)}</span>
             </div>
 
             <dl className="confirm-list">
+                <dt>カウント開始</dt>
+                <dd>
+                    {draft.startAt == null
+                        ? "開始した時刻から"
+                        : `${formatDate(draft.startAt)} ${formatClock(draft.startAt)} から`}
+                </dd>
                 <dt>作業時間</dt>
                 <dd>{formatDuration(draft.requiredSec)}</dd>
                 <dt>数える記録</dt>
@@ -462,6 +507,8 @@ function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
                 <span className={`badge ${status}`}>{STATUS_LABELS[status]}</span>
             </div>
             <div className="deadline muted">
+                {/* カウント開始を指定したセッションだけ出す（指定しなければ作成時刻と同じ） */}
+                {session.startAt !== session.createdAt ? `${formatDeadline(session.startAt, now)}〜` : ""}
                 {`締切 ${formatDeadline(session.due, now)}`}
                 {session.status === "active" && remainingTime > 0 ? `（残り${formatDuration(remainingTime / 1000)}）` : ""}
                 {` ・ $${session.dollars} ・ ${targetLabel(session)}`}

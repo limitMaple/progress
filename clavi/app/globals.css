@@ -181,11 +181,16 @@ a { color: var(--accent); }
 .session-form { display: flex; flex-direction: column; gap: 10px; }
 .session-form label {
   display: grid;
-  grid-template-columns: 72px 1fr;
+  grid-template-columns: 88px 1fr;
   align-items: center;
 }
 .session-form label > span:first-child { color: var(--muted); }
-.row { display: flex; align-items: center; gap: 4px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* 入力欄の下の補足。ラベルの列の分だけ右に寄せる */
+.field-note { margin: -6px 0 0 88px; font-size: 12px; }
+@media (max-width: 600px) {
+  .field-note { margin-left: 0; }
+}
 input.num { width: 64px; }
 .session-form input[list], .session-form select { width: 100%; }
 

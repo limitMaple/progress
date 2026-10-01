@@ -74,6 +74,7 @@ async function setup(overrides: Partial<Session> = {}) {
     tag: '',
     requiredSec: 3600,
     createdAt: now - 2 * HOUR,
+    startAt: now - 2 * HOUR,
     due: now - MIN,
     dollars: 10,
     status: 'active',
@@ -278,15 +279,15 @@ test('プロジェクトを指定したセッションは、そのプロジェ�
   assert.equal((await read(uid, session.id)).measuredSec, 30 * 60);
 });
 
-test('プロジェクト指定ができる前のセッション（項目なし）は、すべての記録で判定する', async () => {
-  const { uid, session } = await setup();
-  const { projectId: _projectId, projectName: _projectName, ...legacy } = session;
-  await sessionsRef(uid).doc(session.id).set(legacy as Session);
-  togglEntries = [entry(session.createdAt, 30, 7), entry(session.createdAt + 30 * MIN, 40, 8)];
+test('カウント開始より前の記録は数えない', async () => {
+  // 作成は 2 時間前、カウント開始は 1 時間半前。作成からなら 70 分、開始からなら 40 分
+  const { uid, session } = await setup({ startAt: Date.now() - 90 * MIN });
+  togglEntries = [entry(session.createdAt, 30), entry(session.startAt, 40)];
 
-  const result = await settleSession(uid, legacy as Session);
+  const result = await settleSession(uid, session);
 
-  assert.equal(result.status, 'done');
+  assert.equal(result.status, 'charged');
+  assert.equal((await read(uid, session.id)).measuredSec, 40 * 60);
 });
 
 test('締切前の同期では、達していれば done にする', async () => {

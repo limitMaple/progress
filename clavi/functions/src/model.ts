@@ -19,11 +19,14 @@ export interface Settings {
   lastInput: LastInput | null;
 }
 
+/** 入力欄の値そのもの。日付は "YYYY-MM-DD"、時刻は "HH:MM"（どちらも利用者のタイムゾーン）、空欄は "" */
 export interface LastInput {
   projectId: number | null;
   tag: string;
-  /** 締切の時刻。利用者のタイムゾーンでの "HH:MM" */
-  deadline: string;
+  startDate: string;
+  startTime: string;
+  deadlineDate: string;
+  deadlineTime: string;
   requiredSec: number;
   dollars: number;
 }
@@ -48,6 +51,9 @@ export interface Tokens {
 }
 
 export type SessionStatus = 'active' | 'done' | 'charged' | 'error';
+
+/** カウント開始を過去にできる限度。Toggl から取る記録の範囲が広がりすぎないようにする */
+export const MAX_START_PAST_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface SettleState {
   attempts: number;
@@ -77,6 +83,8 @@ export interface Session {
   tag: string;
   requiredSec: number;
   createdAt: number;
+  /** Toggl の記録を数え始める時刻。開始時に指定しなければ createdAt と同じ */
+  startAt: number;
   due: number;
   dollars: number;
   status: SessionStatus;
@@ -125,6 +133,8 @@ export interface StartSessionRequest {
   projectId: number | null;
   tag: string;
   requiredSec: number;
+  /** 数え始める時刻。null なら開始した時刻から */
+  startAt: number | null;
   due: number;
   dollars: number;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  trackedSeconds, resolveDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
+  trackedSeconds, localDateTime, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from '../src/progress.js';
 import type { TimeEntry } from '../src/model.js';
 
@@ -64,10 +64,12 @@ test('締切（to）より後の分は数えない', () => {
   assert.equal(trackedSeconds(entries, { from: at('10:00'), to: at('12:00') }, at('14:00')), 7200);
 });
 
-test('締切の時刻が過ぎていれば翌日になる', () => {
-  assert.equal(resolveDeadline('23:30', at('22:00')), at('23:30'));
-  assert.equal(resolveDeadline('01:00', at('22:00')), at('01:00') + 86400000);
-  assert.equal(resolveDeadline('22:00', at('22:00')), at('22:00') + 86400000);
+test('日付と時刻から時刻を作る', () => {
+  assert.equal(localDateTime('2026-09-16', '23:30'), at('23:30'));
+  assert.equal(localDateTime('2026-09-16', ''), at('00:00'));
+  assert.equal(localDateTime('', '23:30'), null);
+  assert.equal(localDateTime('2026-9-16', '23:30'), null);
+  assert.equal(localDateTime('2026-09-16', '9:00'), null);
 });
 
 test('セッションの名前', () => {

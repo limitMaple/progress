@@ -32,8 +32,8 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
   if (!tokens.togglToken) throw new Error('TogglのAPIトークンが未設定です');
 
   const now = Date.now();
-  // start_date は記録の開始時刻で絞られるので、セッション開始前から続く記録も拾えるよう広めに取る
-  const from = Math.min(...targets.map((s) => s.createdAt)) - DAY;
+  // start_date は記録の開始時刻で絞られるので、カウント開始前から続く記録も拾えるよう広めに取る
+  const from = Math.min(...targets.map((s) => s.startAt)) - DAY;
   const entries = await togglClient(tokens.togglToken).timeEntries(
     new Date(from).toISOString(),
     new Date(now + DAY).toISOString(),
@@ -45,11 +45,10 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
     const trackedSec = trackedSeconds(
       entries,
       {
-        from: session.createdAt,
+        from: session.startAt,
         to: Math.min(now, session.due),
         tag: session.tag,
-        // プロジェクト指定ができる前に作ったセッションには項目が無い
-        projectId: session.projectId ?? null,
+        projectId: session.projectId,
       },
       now,
     );
