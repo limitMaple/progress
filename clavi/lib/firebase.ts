@@ -7,16 +7,23 @@ import type {
     StartSessionRequest, StartSessionResponse, SyncNowResponse,
 } from "@/functions/src/model";
 
-// Web アプリの設定値はブラウザに配られる公開情報なので、ビルド時の環境変数にせずそのまま書く
-// （守りたいものは Firestore のルールと Functions の認証で守る）
+// 設定値はコードに書かず、ビルド時の環境変数から読む。
+// 手元は clavi/.env.local（git には入れない。項目は .env.example）、CI は GitHub の Secrets から渡す。
+// NEXT_PUBLIC_ の値はビルド時に JS へ埋め込まれるので、process.env.XXX と 1 つずつ書く必要がある。
 const firebaseConfig = {
-    apiKey: "AIzaSyD1IhuYbNdzetAvGhw-8VuK5a0SFrPo-Bs",
-    authDomain: "remotemaple-51048.firebaseapp.com",
-    projectId: "remotemaple-51048",
-    storageBucket: "remotemaple-51048.firebasestorage.app",
-    messagingSenderId: "1032498603245",
-    appId: "1:1032498603245:web:e233b8ba1b2d89076298e4",
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
+
+// 値が欠けたままビルドすると、壊れた画面がそのまま公開されてしまうので、ビルドの時点で止める
+const missing = Object.entries(firebaseConfig).filter(([, value]) => !value).map(([key]) => key);
+if (missing.length) {
+    throw new Error(`Firebase の設定値がありません: ${missing.join(", ")}（clavi/.env.local か CI の Secrets を確認）`);
+}
 
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
