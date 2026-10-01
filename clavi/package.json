@@ -13,8 +13,8 @@
     "deploy:check": "next build --turbopack && node scripts/deploy.mjs hosting,functions,firestore --dry-run"
   },
   "dependencies": {
-    "firebase": "^12.3.0",
-    "next": "15.5.3",
+    "firebase": "^12.19.0",
+    "next": "15.5.27",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
@@ -24,7 +24,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.3",
+    "eslint-config-next": "15.5.27",
     "typescript": "^5"
   }
 }

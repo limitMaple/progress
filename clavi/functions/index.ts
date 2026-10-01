@@ -164,15 +164,19 @@ export const syncNow = onAuthenticatedCall<void, SyncNowResponse>(async (uid) =>
 });
 
 const RESOLUTIONS: readonly ChargeResolution[] = ['charged', 'not_charged'];
+// セッション ID は randomUUID で作る。'/' などを通すと、Firestore の想定外のパスを指せてしまう
+const SESSION_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 /**
  * 締切を過ぎたのに精算できていないセッションを、画面から精算し直す。
  * 課金されたか分からないものは resolve で人の判断を受け取る。
  */
 export const settleNow = onAuthenticatedCall<SettleNowRequest, SettleResult>(async (uid, data) => {
+  const id = String(data.id ?? '');
+  if (!SESSION_ID.test(id)) throw invalid('セッションの指定が正しくありません');
   const resolve = RESOLUTIONS.find((r) => r === data.resolve);
   if (data.resolve != null && !resolve) throw invalid('resolve の値が正しくありません');
-  return settleManually(uid, String(data.id ?? ''), resolve);
+  return settleManually(uid, id, resolve);
 });
 
 // ---- 締切後の自動精算 ----
