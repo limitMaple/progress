@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { signOut } from "firebase/auth";
 import { deleteDoc, doc } from "firebase/firestore";
-import { auth, db, startSession, syncNow, settleNow } from "@/lib/firebase";
+import { db, startSession, syncNow, settleNow } from "@/lib/firebase";
 import { useSessions, useSettings } from "@/lib/account";
+import { useSignedInUser } from "@/components/AuthGate";
 import {
     resolveDeadline, defaultDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from "@/functions/src/progress";
@@ -36,7 +36,8 @@ function targetLabel({ projectName, tag }: { projectName?: string; tag: string }
     return parts.length ? parts.join("・") : "すべての記録";
 }
 
-export default function Sessions({ uid }: { uid: string }) {
+export default function Sessions() {
+    const { uid } = useSignedInUser();
     const settings = useSettings(uid);
     const sessions = useSessions(uid);
     const now = useNow();
@@ -67,15 +68,6 @@ export default function Sessions({ uid }: { uid: string }) {
 
     return (
         <main>
-            <header className="app-header">
-                <h1>Toggl Ratchet</h1>
-                <div className="actions">
-                    <button type="button" onClick={refresh} disabled={busy || !hasTokens}>↻ 更新</button>
-                    <Link href="/settings" className="button icon" title="設定">⚙</Link>
-                    <button type="button" className="link" onClick={() => signOut(auth)}>ログアウト</button>
-                </div>
-            </header>
-
             {settings && !hasTokens && (
                 <p className="notice">
                     APIトークンが未設定です。<Link href="/settings">設定を開く</Link>
@@ -84,7 +76,10 @@ export default function Sessions({ uid }: { uid: string }) {
             {message.text && <p className={`notice ${message.kind}`}>{message.text}</p>}
 
             <section>
-                <h2>セッション</h2>
+                <div className="section-head">
+                    <h2>セッション</h2>
+                    <button type="button" onClick={refresh} disabled={busy || !hasTokens}>↻ 更新</button>
+                </div>
                 <ul className="session-list">
                     {sessions.map((session) => (
                         <SessionItem

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { saveSettings } from "@/lib/firebase";
 import { useSettings } from "@/lib/account";
+import { useSignedInUser } from "@/components/AuthGate";
 import type { SaveSettingsResponse } from "@/functions/src/model";
 
-export default function SettingsForm({ uid }: { uid: string }) {
+export default function SettingsForm() {
+    const { uid } = useSignedInUser();
     const settings = useSettings(uid);
     const [togglToken, setTogglToken] = useState("");
     const [beeminderToken, setBeeminderToken] = useState("");
@@ -45,10 +46,7 @@ export default function SettingsForm({ uid }: { uid: string }) {
 
     return (
         <main className="settings">
-            <header className="app-header">
-                <h1>設定</h1>
-                <Link href="/">← 戻る</Link>
-            </header>
+            <h2>設定</h2>
 
             <form onSubmit={save}>
                 <label>
