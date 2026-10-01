@@ -1,27 +1,25 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { saveSettings } from "@/lib/firebase";
 import { useSettings } from "@/lib/account";
 import { useSignedInUser } from "@/components/AuthGate";
-import type { SaveSettingsResponse } from "@/functions/src/model";
+import type { SaveSettingsResponse, Settings } from "@/functions/src/model";
 
+/** 設定を読み込んでから、入力欄を作る（入力欄の初期値に保存済みの値を使うため）。 */
 export default function SettingsForm() {
     const { uid } = useSignedInUser();
     const settings = useSettings(uid);
+    if (!settings) return <p className="muted">読み込み中…</p>;
+    return <SettingsFields settings={settings} />;
+}
+
+/** 設定の入力欄。トークンの「設定済み」表示などは、settings が変われば追従する。 */
+function SettingsFields({ settings }: { settings: Settings }) {
     const [togglToken, setTogglToken] = useState("");
     const [beeminderToken, setBeeminderToken] = useState("");
-    const [dollars, setDollars] = useState("");
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<SaveSettingsResponse | null>(null);
-
-    // 保存済みの値は最初の 1 回だけ入れる（保存後の更新で入力中の値を消さないため）
-    const loaded = settings !== null;
-    useEffect(() => {
-        if (!settings) return;
-        setDollars(String(settings.defaultDollars));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loaded]);
 
     async function save(event: FormEvent) {
         event.preventDefault();
@@ -31,7 +29,6 @@ export default function SettingsForm() {
             setStatus(await saveSettings({
                 togglToken: togglToken.trim(),
                 beeminderToken: beeminderToken.trim(),
-                defaultDollars: Math.max(1, Math.floor(Number(dollars) || 10)),
             }));
             setTogglToken("");
             setBeeminderToken("");
@@ -42,7 +39,7 @@ export default function SettingsForm() {
         }
     }
 
-    const tokenPlaceholder = (saved?: boolean) => (saved ? "設定済み（変えるときだけ入力）" : "未設定");
+    const tokenPlaceholder = (saved: boolean) => (saved ? "設定済み（変えるときだけ入力）" : "未設定");
 
     return (
         <main className="settings">
@@ -53,7 +50,7 @@ export default function SettingsForm() {
                     <span>Toggl APIトークン</span>
                     <input
                         type="password" autoComplete="off" spellCheck={false}
-                        placeholder={tokenPlaceholder(settings?.hasTogglToken)}
+                        placeholder={tokenPlaceholder(settings.hasTogglToken)}
                         value={togglToken} onChange={(e) => setTogglToken(e.target.value)}
                     />
                     <small className="muted">
@@ -67,7 +64,7 @@ export default function SettingsForm() {
                     <span>Beeminder APIトークン</span>
                     <input
                         type="password" autoComplete="off" spellCheck={false}
-                        placeholder={tokenPlaceholder(settings?.hasBeeminderToken)}
+                        placeholder={tokenPlaceholder(settings.hasBeeminderToken)}
                         value={beeminderToken} onChange={(e) => setBeeminderToken(e.target.value)}
                     />
                     <small className="muted">
@@ -76,20 +73,12 @@ export default function SettingsForm() {
                             auth_token.json
                         </a>
                         {" "}を開くと出てきます。
-                        {settings?.beeminderUser && `（現在: ${settings.beeminderUser}）`}
+                        {settings.beeminderUser && `（現在: ${settings.beeminderUser}）`}
                     </small>
                 </label>
 
-                <label>
-                    <span>金額の初期値（$）</span>
-                    <input
-                        type="number" min="1" step="1" className="num"
-                        value={dollars} onChange={(e) => setDollars(e.target.value)}
-                    />
-                </label>
-
                 <div className="buttons">
-                    <button type="submit" className="primary" disabled={busy || !loaded}>
+                    <button type="submit" className="primary" disabled={busy}>
                         {busy ? "確認中…" : "保存して接続を確認"}
                     </button>
                 </div>

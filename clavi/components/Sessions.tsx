@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import Link from "next/link";
 import { deleteDoc, doc } from "firebase/firestore";
-import { db, startSession, syncNow, settleNow } from "@/lib/firebase";
+import { db, startSession, syncNow, settleNow, saveLastInput } from "@/lib/firebase";
 import { useSessions, useSettings } from "@/lib/account";
 import { useSignedInUser } from "@/components/AuthGate";
 import {
-    resolveDeadline, defaultDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
+    resolveDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from "@/functions/src/progress";
 import type {
-    ChargeResolution, Session, SessionStatus, StartSessionRequest, TogglProject,
+    ChargeResolution, LastInput, Session, SessionStatus, Settings, StartSessionRequest, TogglProject,
 } from "@/functions/src/model";
-
-const HOUR = 60 * 60 * 1000;
 
 type Message = { text: string; kind: "" | "ok" | "error" };
 
@@ -98,9 +96,9 @@ export default function Sessions() {
 
             {settings && (
                 <NewSessionForm
+                    initial={initialValues(settings)}
                     projects={settings.projects}
                     tags={settings.tags}
-                    defaultDollars={settings.defaultDollars}
                     disabled={busy || !hasTokens}
                     setBusy={setBusy}
                     setMessage={setMessage}
@@ -115,31 +113,111 @@ export default function Sessions() {
 /** 確認画面に出す、開始しようとしている内容。締切は確認画面を開いた時点で決める。 */
 type Draft = StartSessionRequest & { projectName: string };
 
-function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, setMessage }: {
+/** 入力欄の値。どれも input / select の value なので文字列で持つ。 */
+type FormValues = {
+    projectId: string;
+    tag: string;
+    deadline: string;
+    hours: string;
+    minutes: string;
+    dollars: string;
+};
+
+/** 入力欄の初期値。最後に入力した値があればそれ、なければ空（数値は 0）。 */
+function initialValues(settings: Settings): FormValues {
+    const last = settings.lastInput;
+    const requiredSec = last?.requiredSec ?? 0;
+    // 前回のプロジェクトが今は選べない（アーカイブした等）なら「指定なし」に戻す
+    const projectId = last?.projectId != null && settings.projects.some((p) => p.id === last.projectId)
+        ? String(last.projectId)
+        : "";
+    return {
+        projectId,
+        tag: last?.tag ?? "",
+        deadline: last?.deadline ?? "",
+        hours: String(Math.floor(requiredSec / 3600)),
+        minutes: String(Math.floor((requiredSec % 3600) / 60)),
+        dollars: String(last?.dollars ?? 0),
+    };
+}
+
+function toLastInput(values: FormValues): LastInput {
+    return {
+        projectId: values.projectId ? Number(values.projectId) : null,
+        tag: values.tag,
+        deadline: values.deadline,
+        requiredSec: (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60,
+        dollars: Math.floor(Number(values.dollars) || 0),
+    };
+}
+
+// 1 文字ごとに保存しないよう、入力がこの時間止まってから保存する
+const SAVE_DELAY = 800;
+
+function saveNow(values: FormValues) {
+    // 保存できなくても入力は続けられるので、画面には出さない
+    saveLastInput(toLastInput(values)).catch((err) => console.warn("入力の保存に失敗しました", err));
+}
+
+/**
+ * 入力が止まったら、最後の入力として保存する（次に入力欄を開いたときの初期値になる）。
+ * 画面を離れるときに保存待ちの入力があれば、その場で保存する。
+ */
+function useSaveLastInput(values: FormValues) {
+    const pending = useRef<FormValues | null>(null);
+    const isFirst = useRef(true);
+
+    useEffect(() => {
+        // 最初の描画は保存済みの値（初期値）そのものなので、保存し直さない
+        if (isFirst.current) {
+            isFirst.current = false;
+            return;
+        }
+        pending.current = values;
+        const timer = setTimeout(() => {
+            pending.current = null;
+            saveNow(values);
+        }, SAVE_DELAY);
+        return () => clearTimeout(timer);
+    }, [values]);
+
+    useEffect(() => () => {
+        if (pending.current) saveNow(pending.current);
+    }, []);
+}
+
+/**
+ * 新しいセッションの入力欄。
+ * initial は作るときに 1 回だけ使う（あとで設定が変わっても、入力中の値は上書きしない）。
+ * projects と tags は選択肢なので、設定が変われば追従する。
+ */
+function NewSessionForm({ initial, projects, tags, disabled, setBusy, setMessage }: {
+    initial: FormValues;
     projects: TogglProject[];
     tags: string[];
-    defaultDollars: number;
     disabled: boolean;
     setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;
 }) {
-    const [projectId, setProjectId] = useState("");
-    const [tag, setTag] = useState("");
-    const [deadline, setDeadline] = useState(() => defaultDeadline(Date.now(), 3 * HOUR));
-    const [hours, setHours] = useState("2");
-    const [minutes, setMinutes] = useState("0");
-    const [dollars, setDollars] = useState(String(defaultDollars));
+    const [values, setValues] = useState(initial);
     const [draft, setDraft] = useState<Draft | null>(null);
+    useSaveLastInput(values);
+    // 残り時間の表示を進めるためだけに、30 秒ごとに描き直す
     useNow();
+
+    const change = (key: keyof FormValues) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { value } = e.target;
+        setValues((v) => ({ ...v, [key]: value }));
+    };
 
     const form = readForm();
 
     function readForm() {
         const now = Date.now();
-        const project = projects.find((p) => String(p.id) === projectId) ?? null;
-        const requiredSec = (Number(hours) || 0) * 3600 + (Number(minutes) || 0) * 60;
-        const amount = Math.floor(Number(dollars) || 0);
-        const due = deadline ? resolveDeadline(deadline, now) : null;
+        const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
+        const requiredSec = (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60;
+        const amount = Math.floor(Number(values.dollars) || 0);
+        const due = values.deadline ? resolveDeadline(values.deadline, now) : null;
 
         let error = "";
         if (!due) error = "締切を入力してください";
@@ -148,7 +226,7 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
         else if (due - now < requiredSec * 1000) {
             error = `締切まで残り${formatDuration((due - now) / 1000)}しかありません`;
         }
-        return { now, project, tag: tag.trim(), requiredSec, dollars: amount, due, error };
+        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, due, error };
     }
 
     /** 開始ボタン。すぐには始めず、確認画面を開く。 */
@@ -204,7 +282,7 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
             <form className="session-form" onSubmit={review} noValidate>
                 <label>
                     <span>プロジェクト</span>
-                    <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                    <select value={values.projectId} onChange={change("projectId")}>
                         <option value="">指定なし</option>
                         {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
                     </select>
@@ -216,8 +294,8 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
                         list="tag-options"
                         placeholder="空欄ならタグで絞らない"
                         autoComplete="off"
-                        value={tag}
-                        onChange={(e) => setTag(e.target.value)}
+                        value={values.tag}
+                        onChange={change("tag")}
                     />
                 </label>
                 <datalist id="tag-options">
@@ -227,7 +305,7 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
                 <label>
                     <span>締切</span>
                     <span className="row">
-                        <input type="time" required value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+                        <input type="time" required value={values.deadline} onChange={change("deadline")} />
                         <span className="muted">{form.due ? formatDay(form.due, form.now) : ""}</span>
                     </span>
                 </label>
@@ -237,11 +315,11 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
                     <span className="row">
                         <input
                             type="number" min="0" max="99" className="num"
-                            value={hours} onChange={(e) => setHours(e.target.value)}
+                            value={values.hours} onChange={change("hours")}
                         />時間
                         <input
                             type="number" min="0" max="59" step="5" className="num"
-                            value={minutes} onChange={(e) => setMinutes(e.target.value)}
+                            value={values.minutes} onChange={change("minutes")}
                         />分
                     </span>
                 </label>
@@ -251,7 +329,7 @@ function NewSessionForm({ projects, tags, defaultDollars, disabled, setBusy, set
                     <span className="row">
                         $<input
                             type="number" min="1" step="1" className="num"
-                            value={dollars} onChange={(e) => setDollars(e.target.value)}
+                            value={values.dollars} onChange={change("dollars")}
                         />
                     </span>
                 </label>

@@ -10,7 +10,7 @@ import type { Session } from './model.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-export interface SyncResult {
+interface SyncResult {
   /** 対象にしたセッション（更新後の値） */
   synced: Session[];
   /** そのうち今回達成になったもの */

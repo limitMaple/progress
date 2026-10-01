@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  trackedSeconds, resolveDeadline, defaultDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
+  trackedSeconds, resolveDeadline, sessionTitle, formatDuration, formatDay, formatDeadline,
 } from '../src/progress.js';
 import type { TimeEntry } from '../src/model.js';
 
@@ -68,11 +68,6 @@ test('締切の時刻が過ぎていれば翌日になる', () => {
   assert.equal(resolveDeadline('23:30', at('22:00')), at('23:30'));
   assert.equal(resolveDeadline('01:00', at('22:00')), at('01:00') + 86400000);
   assert.equal(resolveDeadline('22:00', at('22:00')), at('22:00') + 86400000);
-});
-
-test('締切の初期値は10分単位に切り上げる', () => {
-  assert.equal(defaultDeadline(at('10:03'), 3 * 3600000), '13:10');
-  assert.equal(defaultDeadline(at('10:00'), 3 * 3600000), '13:00');
 });
 
 test('セッションの名前', () => {

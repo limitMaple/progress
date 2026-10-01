@@ -155,7 +155,7 @@ test('課金の前に失敗したら、課金せずに 1 分後の再試行を�
 
 test('3 回失敗したら error で止め、それ以上は予約しない', async () => {
   const { uid, session } = await setup({
-    settle: { attempts: 2, retryAt: Date.now() - 1000, message: '', at: Date.now() - MIN },
+    settle: { attempts: 2, retryAt: Date.now() - 1000, message: '' },
   });
   togglFails = true;
 

@@ -41,13 +41,6 @@ export function resolveDeadline(hhmm: string, now: number): number {
   return d.getTime();
 }
 
-/** now から minMs 以上先の時刻を、stepMin 分単位に切り上げて "HH:MM" で返す。 */
-export function defaultDeadline(now: number, minMs: number, stepMin = 10): string {
-  const step = stepMin * 60 * 1000;
-  const d = new Date(Math.ceil((now + minMs) / step) * step);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 /** セッションの名前。「資格 / 過去問 2時間00分」「作業 45分」の形。確認画面とサーバーで同じものを使う。 */
 export function sessionTitle(
   { projectName, tag, requiredSec }: { projectName: string; tag: string; requiredSec: number },

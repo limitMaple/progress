@@ -16,7 +16,7 @@ import type { ChargeRecord, ChargeResolution, Session, SessionStatus, SettleResu
 const RETRY_DELAY = 60 * 1000;
 const MAX_ATTEMPTS = 3;
 // 締切ちょうどの記録も拾えるよう、少しだけ待ってから精算する
-export const SETTLE_DELAY = 30 * 1000;
+const SETTLE_DELAY = 30 * 1000;
 
 type SessionRef = DocumentReference<Session>;
 
@@ -102,7 +102,7 @@ async function retryLater(
   const retryAt = canRetry ? now + RETRY_DELAY : null;
   await ref.update({
     status,
-    settle: { attempts, retryAt, message, at: now },
+    settle: { attempts, retryAt, message },
     checkAt: retryAt,
     claimedAt: null,
   });
@@ -115,7 +115,7 @@ async function stopForReview(ref: SessionRef, attempts: number, err: Error): Pro
     + 'Beeminderの課金履歴を確かめて、画面から「課金されていた / いなかった」を選んでください。';
   await ref.update({
     status: 'error',
-    settle: { attempts, retryAt: null, message, at: Date.now() },
+    settle: { attempts, retryAt: null, message },
     checkAt: null,
     claimedAt: null,
   });
@@ -131,7 +131,7 @@ async function finish(
   await ref.update({
     status,
     charge,
-    settle: { attempts, retryAt: null, message, at: Date.now() },
+    settle: { attempts, retryAt: null, message },
     checkAt: null,
     claimedAt: null,
   });

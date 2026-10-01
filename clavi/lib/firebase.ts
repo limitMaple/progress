@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth"
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import type {
-    SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult,
+    LastInput, SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult,
     StartSessionRequest, StartSessionResponse, SyncNowResponse,
 } from "@/functions/src/model";
 
@@ -25,7 +25,7 @@ if (missing.length) {
     throw new Error(`Firebase の設定値がありません: ${missing.join(", ")}（clavi/.env.local か CI の Secrets を確認）`);
 }
 
-export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
@@ -53,3 +53,4 @@ export const saveSettings = callFunction<SaveSettingsRequest, SaveSettingsRespon
 export const startSession = callFunction<StartSessionRequest, StartSessionResponse>("startSession");
 export const syncNow = callFunction<void, SyncNowResponse>("syncNow");
 export const settleNow = callFunction<SettleNowRequest, SettleResult>("settleNow");
+export const saveLastInput = callFunction<LastInput, void>("saveLastInput");

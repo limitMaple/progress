@@ -7,7 +7,6 @@
 // 時刻はすべて epoch ms。
 
 export interface Settings {
-  defaultDollars: number;
   /** Toggl のタグ名（入力補完用） */
   tags: string[];
   /** Toggl の進行中のプロジェクト（選択肢用） */
@@ -16,15 +15,26 @@ export interface Settings {
   hasBeeminderToken: boolean;
   /** 課金 API の user_id に使う */
   beeminderUser: string;
+  /** 新しいセッションの入力欄に最後に入力した値。次に開いたときの初期値に使う */
+  lastInput: LastInput | null;
+}
+
+export interface LastInput {
+  projectId: number | null;
+  tag: string;
+  /** 締切の時刻。利用者のタイムゾーンでの "HH:MM" */
+  deadline: string;
+  requiredSec: number;
+  dollars: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  defaultDollars: 10,
   tags: [],
   projects: [],
   hasTogglToken: false,
   hasBeeminderToken: false,
   beeminderUser: '',
+  lastInput: null,
 };
 
 export interface TogglProject {
@@ -39,12 +49,11 @@ export interface Tokens {
 
 export type SessionStatus = 'active' | 'done' | 'charged' | 'error';
 
-export interface SettleState {
+interface SettleState {
   attempts: number;
   /** 自動で再試行する予定の時刻。予定がなければ null */
   retryAt: number | null;
   message: string;
-  at: number;
 }
 
 export interface ChargeRecord {
@@ -105,7 +114,6 @@ export interface SaveSettingsRequest {
   togglToken: string;
   /** 空欄なら変更しない */
   beeminderToken: string;
-  defaultDollars: number;
 }
 
 export interface SaveSettingsResponse {

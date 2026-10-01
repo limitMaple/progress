@@ -8,16 +8,9 @@ const BEEMINDER_BASE = 'https://www.beeminder.com/api/v1';
 
 type Service = 'Toggl' | 'Beeminder';
 
-export class ApiError extends Error {
-  readonly service: Service;
-  /** 通信自体に失敗したときは 0 */
-  readonly status: number;
-
-  constructor(service: Service, status: number, detail: string) {
-    super(`${service}: ${detail}${status ? ` (HTTP ${status})` : ''}`);
-    this.service = service;
-    this.status = status;
-  }
+/** 「Toggl: APIトークンが正しくありません (HTTP 401)」の形のエラー。status は通信自体に失敗したときは 0。 */
+function apiError(service: Service, status: number, detail: string): Error {
+  return new Error(`${service}: ${detail}${status ? ` (HTTP ${status})` : ''}`);
 }
 
 async function send<T>(service: Service, url: string, init: RequestInit): Promise<T> {
@@ -25,7 +18,7 @@ async function send<T>(service: Service, url: string, init: RequestInit): Promis
   try {
     res = await fetch(url, init);
   } catch (err) {
-    throw new ApiError(service, 0, `通信に失敗しました（${(err as Error).message}）`);
+    throw apiError(service, 0, `通信に失敗しました（${(err as Error).message}）`);
   }
 
   const text = await res.text();
@@ -48,7 +41,7 @@ async function send<T>(service: Service, url: string, init: RequestInit): Promis
   } else if (res.status === 401 || res.status === 403) {
     detail ||= 'APIトークンが正しくありません';
   }
-  throw new ApiError(service, res.status, detail || 'エラーが発生しました');
+  throw apiError(service, res.status, detail || 'エラーが発生しました');
 }
 
 /** エラーの本文からメッセージを取り出す。Beeminder は { errors: { message } } の形で返す。 */
@@ -59,16 +52,16 @@ function errorMessageOf(body: unknown): string {
 
 // ---- Toggl ----
 
-export interface TogglMe {
+interface TogglMe {
   fullname?: string;
   email: string;
 }
 
-export interface TogglTag {
+interface TogglTag {
   name: string;
 }
 
-export interface TogglProjectEntry {
+interface TogglProjectEntry {
   id: number;
   name: string;
   active: boolean;
@@ -91,11 +84,11 @@ export function togglClient(token: string) {
 
 // ---- Beeminder ----
 
-export interface BeeminderMe {
+interface BeeminderMe {
   username: string;
 }
 
-export interface BeeminderCharge {
+interface BeeminderCharge {
   id: string;
   amount: number;
   note: string;

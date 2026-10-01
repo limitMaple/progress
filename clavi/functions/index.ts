@@ -15,7 +15,7 @@ import { settleSession, settleManually, settleTime } from './src/settle.js';
 import { togglClient, beeminderClient } from './src/api.js';
 import { sessionTitle } from './src/progress.js';
 import type {
-  ChargeResolution, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
+  ChargeResolution, LastInput, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
   SettleResult, Settings, StartSessionRequest, StartSessionResponse, SyncNowResponse, Tokens,
 } from './src/model.js';
 
@@ -52,9 +52,7 @@ const invalid = (message: string) => new HttpsError('invalid-argument', message)
 
 export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSettingsResponse>(
   async (uid, data) => {
-    const settings: Partial<Settings> = {
-      defaultDollars: Math.max(1, Math.floor(Number(data.defaultDollars) || 10)),
-    };
+    const settings: Partial<Settings> = {};
 
     // 空欄のトークンは「変更しない」
     const newTokens: Partial<Tokens> = {};
@@ -155,6 +153,31 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
     return { id: session.id };
   },
 );
+
+// ---- 入力欄の値の保存 ----
+
+/** 整数に直し、範囲の外なら端に寄せる。数値でなければ fallback。 */
+const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+
+/**
+ * 新しいセッションの入力欄に最後に入力した値を保存する。画面は入力が止まるたびに呼ぶ。
+ * 次に入力欄を開いたときの初期値にするためだけのもので、何かを判定することはない。
+ */
+export const saveLastInput = onAuthenticatedCall<LastInput, void>(async (uid, data) => {
+  const deadline = String(data.deadline ?? '');
+  const projectId = data.projectId == null ? null : clampInt(data.projectId, 0, Number.MAX_SAFE_INTEGER, 0);
+  const lastInput: LastInput = {
+    projectId: projectId || null,
+    tag: String(data.tag ?? '').slice(0, 100),
+    deadline: /^\d{2}:\d{2}$/.test(deadline) ? deadline : '',
+    requiredSec: clampInt(data.requiredSec, 0, 99 * 3600, 0),
+    dollars: clampInt(data.dollars, 0, 100_000, 0),
+  };
+  await userRef(uid).set({ lastInput }, { merge: true });
+});
 
 // ---- 手動の更新と精算 ----
 
