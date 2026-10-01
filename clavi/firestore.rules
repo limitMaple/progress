@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// 書き込みは基本的に Functions（管理者権限なのでルールの対象外）から行う。
+// secrets/{uid} には API トークンが入るので、ここに書かれていない＝誰も読めない。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+
+      match /sessions/{id} {
+        allow read: if isOwner(uid);
+        // 精算の済んだセッションだけ、画面から一覧を消せる
+        // （active と error は精算待ちなので、消して課金から逃げられないようにする）
+        allow delete: if isOwner(uid) && resource.data.status in ['done', 'charged'];
+      }
+    }
+  }
+}
