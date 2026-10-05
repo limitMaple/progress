@@ -10,28 +10,29 @@ import type { DocumentReference } from 'firebase-admin/firestore';
 import { loadAccount, sessionsRef, claimSettlement } from './store.ts';
 import { beeminderClient } from './api.ts';
 import { syncSessions } from './sync.ts';
-import { formatDuration } from './progress.ts';
-import type { ChargeRecord, ChargeResolution, SessionData, SessionStatus, SettleResult } from './model.ts';
-import type { Session } from './session.ts';
-
-const RETRY_DELAY = 60 * 1000;
-const MAX_ATTEMPTS = 3;
+import type { ChargeResolution, SessionData, SettleResult } from './model.ts';
+import type { Session, SessionPatch } from './session.ts';
 
 type SessionRef = DocumentReference<Session, SessionData>;
+
+/** 差分を保存して、精算の結果として返す。 */
+async function save(ref: SessionRef, session: Session, patch: SessionPatch): Promise<SettleResult> {
+  await ref.update(patch);
+  const next = session.with(patch);
+  return { status: next.status, message: next.settle?.message ?? '' };
+}
 
 /**
  * セッションを 1 件精算する。
  * 進捗を測り（一度測っていればその値を使い）、達成していなければ賭けた額を課金する。
- * 課金の前に失敗したら 1 分おきに最大 3 回まで試し、それでもだめなら status を 'error' にする。
- * 課金に取りかかったあとで失敗したら、再試行せずに 'error' で止める。
+ * 失敗したときの扱いは Session.retryLater / stopForReview を参照。
  */
 export async function settleSession(uid: string, session: Session): Promise<SettleResult> {
   const ref = sessionsRef(uid).doc(session.id);
-  const attempts = (session.settle?.attempts ?? 0) + 1;
-  // check: 判定中 → charging: 課金 API を呼んだ → charged: 課金 API が成功した
-  let stage: 'check' | 'charging' | 'charged' = 'check';
-  let charge: ChargeRecord | null = null;
-  let message = '';
+  // 課金 API を呼んだか。呼んだあとで失敗したら、課金し直さずに人の確認を待つ
+  let chargeRequested = false;
+  // 課金 API が成功したときの差分。保存に失敗したら、これだけもう一度保存する
+  let charged: SessionPatch | null = null;
 
   try {
     // 締切後に一度測った値があればそれを使う。測り直すと、あとから Toggl に足した記録まで数えてしまう
@@ -40,95 +41,34 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
       trackedSec = ((await syncSessions(uid, [session.id])).synced[0] ?? session).trackedSec;
       await ref.update({ measuredSec: trackedSec });
     }
-    // sync は締切後に達成にしないので、到達したかはここで見る
-    if (session.isReached(trackedSec)) {
-      return await finish(ref, attempts, 'done', {
-        message: `達成しました（${formatDuration(trackedSec)}）。課金はありません。`,
-      });
-    }
+    // sync は締切後に達成にしないので、届いたかはここで見る
+    if (trackedSec >= session.requiredSec) return await save(ref, session, session.settleAsDone(trackedSec));
 
     const { settings, tokens } = await loadAccount(uid);
     if (!tokens.beeminderToken) throw new Error('BeeminderのAPIトークンが未設定です');
 
-    await ref.update({ chargeRequestedAt: Date.now(), checkAt: null });
-    stage = 'charging';
+    await ref.update(session.requestCharge(Date.now()));
+    chargeRequested = true;
     const result = await beeminderClient(tokens.beeminderToken).charge({
       user: settings.beeminderUser,
       amount: session.dollars,
       note: session.chargeNote(),
     });
-    stage = 'charged';
-
-    message = `届きませんでした（${session.progressLabel(trackedSec)}）。$${session.dollars}を課金しました。`;
-    charge = {
+    charged = session.settleAsCharged(trackedSec, {
       id: String(result?.id ?? ''),
       amount: Number(result?.amount ?? session.dollars),
       at: Date.now(),
       manual: false,
-    };
-    return await finish(ref, attempts, 'charged', { message, charge });
+    });
+    return await save(ref, session, charged);
   } catch (err) {
-    const error = err as Error;
-    if (stage === 'check') return retryLater(ref, session, attempts, error);
-    if (stage === 'charged') {
-      // 課金は通ったので、記録だけもう一度試す。これも失敗したら例外のまま上に返す
-      // （chargeRequestedAt が立っているので、再び課金されることはない）
-      return finish(ref, attempts, 'charged', { message, charge });
-    }
-    return stopForReview(ref, attempts, error);
+    const { message } = err as Error;
+    // 課金は通ったので、記録だけもう一度試す。これも失敗したら例外のまま上に返す
+    // （chargeRequestedAt が立っているので、再び課金されることはない）
+    if (charged) return save(ref, session, charged);
+    if (chargeRequested) return save(ref, session, session.stopForReview(message));
+    return save(ref, session, session.retryLater(message, Date.now()));
   }
-}
-
-/** 課金の前に失敗した。締切後の処理なので status は変えず、少し後にやり直す。 */
-async function retryLater(
-  ref: SessionRef,
-  session: Session,
-  attempts: number,
-  err: Error,
-): Promise<SettleResult> {
-  const now = Date.now();
-  const canRetry = attempts < MAX_ATTEMPTS;
-  const status: SessionStatus = canRetry ? session.status : 'error';
-  const message = canRetry
-    ? `精算に失敗したので、1分後にやり直します（${attempts}/${MAX_ATTEMPTS}）: ${err.message}`
-    : `精算に失敗しました: ${err.message}`;
-  const retryAt = canRetry ? now + RETRY_DELAY : null;
-  await ref.update({
-    status,
-    settle: { attempts, retryAt, message },
-    checkAt: retryAt,
-    claimedAt: null,
-  });
-  return { status, message };
-}
-
-/** 課金 API の途中で失敗した。課金されたか分からないので、人が確かめるまで止める。 */
-async function stopForReview(ref: SessionRef, attempts: number, err: Error): Promise<SettleResult> {
-  const message = `課金されたか分かりません（${err.message}）。`
-    + 'Beeminderの課金履歴を確かめて、画面から「課金されていた / いなかった」を選んでください。';
-  await ref.update({
-    status: 'error',
-    settle: { attempts, retryAt: null, message },
-    checkAt: null,
-    claimedAt: null,
-  });
-  return { status: 'error', message };
-}
-
-async function finish(
-  ref: SessionRef,
-  attempts: number,
-  status: SessionStatus,
-  { message, charge = null }: { message: string; charge?: ChargeRecord | null },
-): Promise<SettleResult> {
-  await ref.update({
-    status,
-    charge,
-    settle: { attempts, retryAt: null, message },
-    checkAt: null,
-    claimedAt: null,
-  });
-  return { status, message };
 }
 
 /**
@@ -153,15 +93,7 @@ export async function settleManually(
   const ref = sessionsRef(uid).doc(id);
 
   if (unresolved && resolve === 'charged') {
-    return finish(ref, (session.settle?.attempts ?? 0) + 1, 'charged', {
-      message: `課金済みとして記録しました（Beeminderの履歴で確認, $${session.dollars}）。`,
-      charge: {
-        id: '',
-        amount: session.dollars,
-        at: Date.now(),
-        manual: true,
-      },
-    });
+    return save(ref, session, session.settleAsChargedManually(Date.now()));
   }
   if (unresolved) {
     await ref.update({ chargeRequestedAt: null });

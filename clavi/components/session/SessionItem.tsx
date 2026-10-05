@@ -24,8 +24,8 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
     setMessage: (message: Message) => void;
 }) {
     const status = session.displayStatus(now);
-    const remainingTime = session.remainingMs(now);
-    const left = session.leftSec;
+    const remainingTime = session.due - now;
+    const left = session.requiredSec - session.trackedSec;
     const unresolved = session.isChargeUnknown;
 
     async function settle(resolve?: ChargeResolution) {

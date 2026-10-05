@@ -27,7 +27,6 @@ test('with は元のセッションを変えずに、書き換えたものを返
   assert.equal(s.trackedSec, 0);
   assert.equal(t.trackedSec, 1800);
   assert.equal(t.progressRatio, 0.5);
-  assert.equal(t.leftSec, 1800);
   assert.equal(t.progressLabel(), '30分 / 1時間00分');
 });
 
@@ -56,4 +55,41 @@ test('isClaimable: 精算済み・ロック中・課金されたか分からな�
 
 test('chargeNote は ID の頭を入れる', () => {
   assert.equal(start().chargeNote(), 'Toggl Ratchet: 資格 / 過去問 1時間00分 (abcdefgh)');
+});
+
+test('progress: 締切前に届けば達成、締切後は届いていても達成にしない', () => {
+  const s = start();
+  assert.deepEqual(s.progress(1800, NOW), { trackedSec: 1800, updatedAt: NOW });
+  assert.equal(s.progress(3600, NOW).status, 'done');
+  assert.equal(s.progress(3600, s.due).status, undefined);
+});
+
+test('retryLater: 2 回までは status を変えずに予定し、3 回目で error にして止める', () => {
+  let s = start().with({ status: 'active' });
+  for (const attempts of [1, 2]) {
+    const patch = s.retryLater('boom', NOW);
+    assert.equal(patch.status, undefined);
+    assert.equal(patch.settle?.attempts, attempts);
+    assert.equal(patch.checkAt, NOW + MIN);
+    s = s.with(patch);
+    assert.equal(s.settleTime(), NOW + MIN);
+  }
+  const last = s.retryLater('boom', NOW);
+  assert.equal(last.status, 'error');
+  assert.equal(last.settle?.attempts, 3);
+  assert.equal(last.checkAt, null);
+  assert.match(last.settle?.message ?? '', /精算に失敗しました: boom/);
+});
+
+test('精算の結果: 課金済み・達成・人の確認待ちは、どれもロックと予定を外す', () => {
+  const s = start().with({ claimedAt: NOW, checkAt: NOW });
+  const charged = s.settleAsCharged(600, { id: 'c', amount: 5, at: NOW, manual: false });
+  assert.equal(charged.status, 'charged');
+  assert.equal(charged.settle?.message, '届きませんでした（10分 / 1時間00分）。$5を課金しました。');
+  for (const patch of [charged, s.settleAsDone(3600), s.stopForReview('x'), s.settleAsChargedManually(NOW)]) {
+    assert.equal(patch.claimedAt, null);
+    assert.equal(patch.checkAt, null);
+  }
+  assert.equal(s.stopForReview('x').status, 'error');
+  assert.equal(s.settleAsChargedManually(NOW).charge?.manual, true);
 });
