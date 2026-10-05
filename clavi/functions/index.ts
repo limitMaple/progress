@@ -9,16 +9,16 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as logger from 'firebase-functions/logger';
 import {
   loadAccount, userRef, secretRef, sessionsRef, allSessions, claimSettlement,
-} from './src/store.js';
-import { syncSessions } from './src/sync.js';
-import { settleSession, settleManually, settleTime } from './src/settle.js';
-import { togglClient, beeminderClient } from './src/api.js';
-import { sessionTitle } from './src/progress.js';
-import { MAX_START_PAST_MS } from './src/model.js';
+} from './src/store.ts';
+import { syncSessions } from './src/sync.ts';
+import { settleSession, settleManually } from './src/settle.ts';
+import { togglClient, beeminderClient } from './src/api.ts';
+import { Session } from './src/session.ts';
+import { MAX_START_PAST_MS } from './src/model.ts';
 import type {
-  ChargeResolution, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
+  ChargeResolution, SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest,
   SettleResult, Settings, StartSessionRequest, StartSessionResponse, SyncNowResponse, Tokens,
-} from './src/model.js';
+} from './src/model.ts';
 
 initializeApp();
 setGlobalOptions({ region: 'asia-northeast1', maxInstances: 5 });
@@ -134,27 +134,7 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
       throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
     }
 
-    const draft: Omit<Session, 'checkAt'> = {
-      id: randomUUID(),
-      title: sessionTitle({ projectName: project?.name ?? '', tag, requiredSec }),
-      projectId,
-      projectName: project?.name ?? '',
-      tag,
-      requiredSec,
-      createdAt: now,
-      startAt,
-      due,
-      dollars,
-      status: 'active',
-      trackedSec: 0,
-      updatedAt: null,
-      settle: null,
-      charge: null,
-      claimedAt: null,
-      chargeRequestedAt: null,
-      measuredSec: null,
-    };
-    const session: Session = { ...draft, checkAt: settleTime(draft) };
+    const session = Session.start({ id: randomUUID(), now, project, tag, requiredSec, startAt, due, dollars });
     await sessionsRef(uid).doc(session.id).set(session);
     // 次の入力欄の初期値にする
     await userRef(uid).set({ lastRequiredSec: requiredSec }, { merge: true });
@@ -198,7 +178,7 @@ export const autoSettle = onSchedule(
       const session = await claimSettlement(uid, doc.id);
       if (!session) return;
 
-      const wait = settleTime(session) - Date.now();
+      const wait = session.settleTime() - Date.now();
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 
       const result = await settleSession(uid, session);

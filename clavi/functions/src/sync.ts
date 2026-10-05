@@ -2,11 +2,10 @@
 // 課金はしない（それは settle.ts の仕事）。
 
 import { getFirestore } from 'firebase-admin/firestore';
-import type { UpdateData } from 'firebase-admin/firestore';
-import { loadAccount, sessionsRef } from './store.js';
-import { togglClient } from './api.js';
-import { trackedSeconds } from './progress.js';
-import type { Session } from './model.js';
+import { loadAccount, sessionsRef } from './store.ts';
+import { togglClient } from './api.ts';
+import type { SessionData } from './model.ts';
+import type { Session } from './session.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -41,28 +40,17 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
 
   const batch = getFirestore().batch();
   for (const session of targets) {
-    // カウント開始より前と締切より後は数えないので、締切後は値が動かない
-    const trackedSec = trackedSeconds(
-      entries,
-      {
-        from: session.startAt,
-        to: Math.min(now, session.due),
-        tag: session.tag,
-        projectId: session.projectId,
-      },
-      now,
-    );
+    // 締切より後は数えないので、締切後は値が動かない
+    const trackedSec = session.measure(entries, now);
     // 締切後は達成にしない。Toggl には過去の時刻で記録を足せるので、締切後に足した記録で
     // 課金を逃れられてしまう。締切後の判定は精算（settle.ts）だけが行う。
-    const reached = trackedSec >= session.requiredSec && now < session.due;
-    const patch: UpdateData<Session> = reached
+    const reached = session.isReached(trackedSec) && now < session.due;
+    const patch: Partial<SessionData> = reached
       ? { trackedSec, updatedAt: now, status: 'done', checkAt: null }
       : { trackedSec, updatedAt: now };
     batch.update(sessionsRef(uid).doc(session.id), patch);
 
-    const updated: Session = reached
-      ? { ...session, trackedSec, updatedAt: now, status: 'done', checkAt: null }
-      : { ...session, trackedSec, updatedAt: now };
+    const updated = session.with(patch);
     result.synced.push(updated);
     if (reached) result.done.push(updated);
   }

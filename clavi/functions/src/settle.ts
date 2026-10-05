@@ -7,22 +7,17 @@
 // （Beeminder の課金 API には、同じ依頼を 1 回分として扱う仕組みがない）
 
 import type { DocumentReference } from 'firebase-admin/firestore';
-import { loadAccount, sessionsRef, claimSettlement } from './store.js';
-import { beeminderClient } from './api.js';
-import { syncSessions } from './sync.js';
-import { formatDuration } from './progress.js';
-import type { ChargeRecord, ChargeResolution, Session, SessionStatus, SettleResult } from './model.js';
+import { loadAccount, sessionsRef, claimSettlement } from './store.ts';
+import { beeminderClient } from './api.ts';
+import { syncSessions } from './sync.ts';
+import { formatDuration } from './progress.ts';
+import type { ChargeRecord, ChargeResolution, SessionData, SessionStatus, SettleResult } from './model.ts';
+import type { Session } from './session.ts';
 
 const RETRY_DELAY = 60 * 1000;
 const MAX_ATTEMPTS = 3;
-// 締切ちょうどの記録も拾えるよう、少しだけ待ってから精算する
-const SETTLE_DELAY = 30 * 1000;
 
-type SessionRef = DocumentReference<Session>;
-
-/** 次に精算する時刻。再試行の予定があればそれ、なければ締切の少し後。 */
-export const settleTime = (session: Pick<Session, 'settle' | 'due'>): number =>
-  session.settle?.retryAt ?? session.due + SETTLE_DELAY;
+type SessionRef = DocumentReference<Session, SessionData>;
 
 /**
  * セッションを 1 件精算する。
@@ -46,7 +41,7 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
       await ref.update({ measuredSec: trackedSec });
     }
     // sync は締切後に達成にしないので、到達したかはここで見る
-    if (trackedSec >= session.requiredSec) {
+    if (session.isReached(trackedSec)) {
       return await finish(ref, attempts, 'done', {
         message: `達成しました（${formatDuration(trackedSec)}）。課金はありません。`,
       });
@@ -60,13 +55,11 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
     const result = await beeminderClient(tokens.beeminderToken).charge({
       user: settings.beeminderUser,
       amount: session.dollars,
-      // Beeminder の履歴と突き合わせられるよう、セッション ID の頭を入れておく
-      note: `Toggl Ratchet: ${session.title} (${session.id.slice(0, 8)})`,
+      note: session.chargeNote(),
     });
     stage = 'charged';
 
-    const short = `${formatDuration(trackedSec)} / ${formatDuration(session.requiredSec)}`;
-    message = `届きませんでした（${short}）。$${session.dollars}を課金しました。`;
+    message = `届きませんでした（${session.progressLabel(trackedSec)}）。$${session.dollars}を課金しました。`;
     charge = {
       id: String(result?.id ?? ''),
       amount: Number(result?.amount ?? session.dollars),
@@ -152,7 +145,7 @@ export async function settleManually(
   if (!current) throw new Error('セッションが見つかりません');
   if (Date.now() < current.due) throw new Error('締切前なので精算できません');
 
-  const unresolved = Boolean(current.chargeRequestedAt) && !current.charge;
+  const unresolved = current.isChargeUnknown;
   if (unresolved && !resolve) throw new Error('課金されたかの確認が必要です');
 
   const session = await claimSettlement(uid, id, { resolving: unresolved });
@@ -172,7 +165,7 @@ export async function settleManually(
   }
   if (unresolved) {
     await ref.update({ chargeRequestedAt: null });
-    return settleSession(uid, { ...session, chargeRequestedAt: null });
+    return settleSession(uid, session.with({ chargeRequestedAt: null }));
   }
   return settleSession(uid, session);
 }

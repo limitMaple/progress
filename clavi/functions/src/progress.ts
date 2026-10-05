@@ -1,6 +1,6 @@
 // 進捗計算と表示用の純粋関数。Web アプリからも import するので、Node に依存しないこと。
 
-import type { TimeEntry } from './model.js';
+import type { TimeEntry } from './model.ts';
 
 /**
  * Toggl の time entry のうち、[from, to) に重なる部分の合計秒数を返す。

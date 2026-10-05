@@ -4,10 +4,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase-admin/app';
-import { settleSession, settleManually } from '../src/settle.js';
-import { syncSessions } from '../src/sync.js';
-import { claimSettlement, sessionsRef, userRef, secretRef } from '../src/store.js';
-import type { Session, TimeEntry } from '../src/model.js';
+import { settleSession, settleManually } from '../src/settle.ts';
+import { syncSessions } from '../src/sync.ts';
+import { claimSettlement, sessionsRef, userRef, secretRef } from '../src/store.ts';
+import { Session } from '../src/session.ts';
+import type { SessionData, TimeEntry } from '../src/model.ts';
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
   throw new Error('Firestore エミュレーターの中で動かしてください（clavi で npm test）');
@@ -61,12 +62,12 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
 let seq = 0;
 
 /** 新しいユーザーとセッションを 1 件作る。テストごとに別の uid にして干渉させない。 */
-async function setup(overrides: Partial<Session> = {}) {
+async function setup(overrides: Partial<SessionData> = {}) {
   const uid = `user${++seq}-${Date.now()}`;
   const now = Date.now();
   await userRef(uid).set({ beeminderUser: 'alice' });
   await secretRef(uid).set({ togglToken: 'toggl', beeminderToken: 'bee' });
-  const session: Session = {
+  const session = new Session({
     id: `session-${seq}-abcdefgh`,
     title: '作業 1時間00分',
     projectId: null,
@@ -87,7 +88,7 @@ async function setup(overrides: Partial<Session> = {}) {
     chargeRequestedAt: null,
     measuredSec: null,
     ...overrides,
-  };
+  });
   await sessionsRef(uid).doc(session.id).set(session);
   return { uid, session };
 }

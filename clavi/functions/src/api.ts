@@ -1,7 +1,7 @@
 // Toggl Track API v9 と Beeminder API v1 の薄いクライアント。
 // トークンを外に出さないため、呼ぶのは Cloud Functions だけ。
 
-import type { TimeEntry } from './model.js';
+import type { TimeEntry } from './model.ts';
 
 const TOGGL_BASE = 'https://api.track.toggl.com/api/v9';
 const BEEMINDER_BASE = 'https://www.beeminder.com/api/v1';
