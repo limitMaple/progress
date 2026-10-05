@@ -1,8 +1,7 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
-import type { User } from "firebase/auth";
 import { signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
 import { auth, provider } from "@/lib/firebase";
 import { useUser } from "@/lib/account";
@@ -11,11 +10,10 @@ import { useUser } from "@/lib/account";
 // ポップアップを別タブとして開くブラウザでは「No matching frame」で失敗する。開発時は画面遷移でログインする。
 const signIn = process.env.NODE_ENV === "development" ? signInWithRedirect : signInWithPopup;
 
-const SignedInUser = createContext<User | null>(null);
-
 /**
  * ログインしていなければログイン画面を出し、していれば共通のヘッダー（設定・ログアウト）と中身（ページ）を出す。
  * layout.tsx で全ページを包むので、ログインとログアウトはここだけで扱い、ページ側には書かない。
+ * ページはログイン中にしか描かれないので、ユーザーは auth.currentUser! で取ってよい。
  */
 export function AuthGate({ children }: { children: ReactNode }) {
     const user = useUser();
@@ -23,7 +21,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (user === undefined) return <p className="muted">読み込み中…</p>;
     if (user) {
         return (
-            <SignedInUser.Provider value={user}>
+            <>
                 <header className="app-header">
                     <h1><Link href="/" className="home">Toggl Ratchet</Link></h1>
                     <div className="actions">
@@ -32,7 +30,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     </div>
                 </header>
                 {children}
-            </SignedInUser.Provider>
+            </>
         );
     }
 
@@ -48,11 +46,4 @@ export function AuthGate({ children }: { children: ReactNode }) {
             </button>
         </main>
     );
-}
-
-/** ログイン中のユーザー。AuthGate の内側（＝すべてのページ）でだけ使える。 */
-export function useSignedInUser(): User {
-    const user = useContext(SignedInUser);
-    if (!user) throw new Error("useSignedInUser は AuthGate の内側で使ってください");
-    return user;
 }

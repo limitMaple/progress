@@ -1,21 +1,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { saveSettings } from "@/lib/firebase";
+import { auth, saveSettings } from "@/lib/firebase";
 import { useSettings } from "@/lib/account";
-import { useSignedInUser } from "@/components/AuthGate";
-import type { SaveSettingsResponse, Settings } from "@/functions/src/model";
+import type { SaveSettingsResponse } from "@/functions/src/model";
 
-/** 設定を読み込んでから、入力欄を作る（入力欄の初期値に保存済みの値を使うため）。 */
+/** 設定の入力欄。トークンは画面から読めないので、入力欄はいつも空から始める。 */
 export default function SettingsForm() {
-    const { uid } = useSignedInUser();
-    const settings = useSettings(uid);
-    if (!settings) return <p className="muted">読み込み中…</p>;
-    return <SettingsFields settings={settings} />;
-}
-
-/** 設定の入力欄。トークンの「設定済み」表示などは、settings が変われば追従する。 */
-function SettingsFields({ settings }: { settings: Settings }) {
+    const settings = useSettings(auth.currentUser!.uid);
     const [togglToken, setTogglToken] = useState("");
     const [beeminderToken, setBeeminderToken] = useState("");
     const [busy, setBusy] = useState(false);
@@ -24,7 +16,6 @@ function SettingsFields({ settings }: { settings: Settings }) {
     async function save(event: FormEvent) {
         event.preventDefault();
         setBusy(true);
-        setStatus(null);
         try {
             setStatus(await saveSettings({
                 togglToken: togglToken.trim(),
@@ -38,6 +29,8 @@ function SettingsFields({ settings }: { settings: Settings }) {
             setBusy(false);
         }
     }
+
+    if (!settings) return <p className="muted">読み込み中…</p>;
 
     const tokenPlaceholder = (saved: boolean) => (saved ? "設定済み（変えるときだけ入力）" : "未設定");
 

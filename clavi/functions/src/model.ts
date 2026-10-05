@@ -4,7 +4,7 @@
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
 //   users/{uid}/sessions/{id}  … Session（本人も読める）
-// 時刻（〜At, due など）は epoch ms。入力欄の値をそのまま持つ LastInput だけは日付・時刻の文字列。
+// 時刻（〜At, due など）は epoch ms。
 
 export interface Settings {
   /** Toggl のタグ名（入力補完用） */
@@ -15,20 +15,8 @@ export interface Settings {
   hasBeeminderToken: boolean;
   /** 課金 API の user_id に使う */
   beeminderUser: string;
-  /** 新しいセッションの入力欄に最後に入力した値。次に開いたときの初期値に使う */
-  lastInput: LastInput | null;
-}
-
-/** 入力欄の値そのもの。日付は "YYYY-MM-DD"、時刻は "HH:MM"（どちらも利用者のタイムゾーン）、空欄は "" */
-export interface LastInput {
-  projectId: number | null;
-  tag: string;
-  startDate: string;
-  startTime: string;
-  deadlineDate: string;
-  deadlineTime: string;
-  requiredSec: number;
-  dollars: number;
+  /** 最後に開始したセッションの作業時間。新しいセッションの入力欄の初期値に使う */
+  lastRequiredSec: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -37,7 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hasTogglToken: false,
   hasBeeminderToken: false,
   beeminderUser: '',
-  lastInput: null,
+  lastRequiredSec: 0,
 };
 
 export interface TogglProject {

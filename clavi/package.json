@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
-    "start": "next start",
     "lint": "eslint",
     "emulators": "npm --prefix functions run build && firebase emulators:start --only auth,firestore,functions",
     "test": "firebase emulators:exec --only firestore --project demo-toggl-ratchet \"npm --prefix functions test\"",

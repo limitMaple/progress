@@ -16,7 +16,7 @@ import { togglClient, beeminderClient } from './src/api.js';
 import { sessionTitle } from './src/progress.js';
 import { MAX_START_PAST_MS } from './src/model.js';
 import type {
-  ChargeResolution, LastInput, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
+  ChargeResolution, SaveSettingsRequest, SaveSettingsResponse, Session, SettleNowRequest,
   SettleResult, Settings, StartSessionRequest, StartSessionResponse, SyncNowResponse, Tokens,
 } from './src/model.js';
 
@@ -156,43 +156,11 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
     };
     const session: Session = { ...draft, checkAt: settleTime(draft) };
     await sessionsRef(uid).doc(session.id).set(session);
+    // 次の入力欄の初期値にする
+    await userRef(uid).set({ lastRequiredSec: requiredSec }, { merge: true });
     return { id: session.id };
   },
 );
-
-// ---- 入力欄の値の保存 ----
-
-/** 整数に直し、範囲の外なら端に寄せる。数値でなければ fallback。 */
-const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
-  const n = Math.floor(Number(value));
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
-};
-
-/**
- * 新しいセッションの入力欄に最後に入力した値を保存する。画面は入力が止まるたびに呼ぶ。
- * 次に入力欄を開いたときの初期値にするためだけのもので、何かを判定することはない。
- */
-export const saveLastInput = onAuthenticatedCall<LastInput, void>(async (uid, data) => {
-  const projectId = data.projectId == null ? null : clampInt(data.projectId, 0, Number.MAX_SAFE_INTEGER, 0);
-  /** 形が合っていればそのまま、合っていなければ空欄 */
-  const pick = (value: unknown, pattern: RegExp) => {
-    const s = String(value ?? '');
-    return pattern.test(s) ? s : '';
-  };
-  const DATE = /^\d{4}-\d{2}-\d{2}$/;
-  const TIME = /^\d{2}:\d{2}$/;
-  const lastInput: LastInput = {
-    projectId: projectId || null,
-    tag: String(data.tag ?? '').slice(0, 100),
-    startDate: pick(data.startDate, DATE),
-    startTime: pick(data.startTime, TIME),
-    deadlineDate: pick(data.deadlineDate, DATE),
-    deadlineTime: pick(data.deadlineTime, TIME),
-    requiredSec: clampInt(data.requiredSec, 0, 99 * 3600, 0),
-    dollars: clampInt(data.dollars, 0, 100_000, 0),
-  };
-  await userRef(uid).set({ lastInput }, { merge: true });
-});
 
 // ---- 手動の更新と精算 ----
 

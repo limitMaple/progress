@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth"
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import type {
-    LastInput, SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult,
+    SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult,
     StartSessionRequest, StartSessionResponse, SyncNowResponse,
 } from "@/functions/src/model";
 
@@ -53,4 +53,3 @@ export const saveSettings = callFunction<SaveSettingsRequest, SaveSettingsRespon
 export const startSession = callFunction<StartSessionRequest, StartSessionResponse>("startSession");
 export const syncNow = callFunction<void, SyncNowResponse>("syncNow");
 export const settleNow = callFunction<SettleNowRequest, SettleResult>("settleNow");
-export const saveLastInput = callFunction<LastInput, void>("saveLastInput");
