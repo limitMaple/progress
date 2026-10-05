@@ -24,15 +24,19 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
 6. 締切の30秒後、サーバーが自動で精算する
    - 達成 … 課金なし
    - 未達 … 賭けた額を Beeminder で課金（`POST /charges`）
-   - 失敗 … 1分おきに最大3回まで再試行し、それでもだめなら「要確認」。画面の「精算する」で再実行できる
+   - 課金の前に失敗 … 1分おきに最大3回まで再試行し、それでもだめなら「要確認」。画面の「精算する」で再実行できる
+   - 課金 API の途中で失敗 … 課金されたか分からないので、自動では課金し直さず「要確認」で止まる。
+     Beeminder の課金履歴を確かめて、画面で「課金されていた / されていなかった」を選ぶ
 
 進捗はカウント開始から締切までの記録しか数えないので、締切を過ぎてから作業しても達成にはなりません。
 
 ## 構成
 
 - `app/`, `components/` … 画面（Next.js の静的書き出し、Firebase Hosting に置く）
+  - ログインとログアウトは `components/AuthGate.tsx` だけで扱い、`app/layout.tsx` で全ページを包む
+- `lib/` … 画面側の Firebase への接続、画面から呼ぶ関数の定義、データの読み込み
 - `functions/` … Cloud Functions（TypeScript。`tsc` で `lib/` に書き出し、デプロイ前に自動でビルドされる）
-  - `index.ts` … 画面から呼ぶ関数（設定の保存・開始・更新・精算）と、1分おきの自動精算
+  - `index.ts` … 画面から呼ぶ関数（設定の保存・開始・更新・精算・入力欄の値の保存）と、1分おきの自動精算
   - `src/model.ts` … Firestore のデータの形と、画面から呼ぶ関数の引数・戻り値。画面側もここを import する
   - `src/api.ts` … Toggl / Beeminder の薄いクライアント
   - `src/progress.ts` … 進捗計算と表示の純粋関数（拡張版から流用。画面側も使う）
@@ -45,6 +49,9 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
   - `users/{uid}/sessions/{id}` … セッション
 
 ## 開発
+
+はじめに `.env.example` を `.env.local` に写して、Firebase の Web アプリ設定の値を入れます
+（`.env.local` は git に入れない）。値が欠けているとビルドが止まります。
 
 ```
 npm run emulators   # Firebase エミュレーター（別のターミナルで動かしておく）
@@ -64,10 +71,14 @@ npm run deploy      # ビルドして hosting, functions, firestore をまとめ
 ```
 
 `main` に push すると GitHub Actions が Hosting だけを更新します。Functions と Firestore の
-ルールは `npm run deploy`（または `firebase deploy --only functions,firestore`）が必要です。
+ルールは `npm run deploy`（対象を絞るなら `npm run deploy functions`）が必要です。
+`firebase deploy --only a,b` を PowerShell で直接打つと、カンマ区切りが壊れて対象を見失います。
+
+GitHub Actions のビルドには、`.env.example` と同じ名前の値をリポジトリの Secrets に入れておく必要があります
+（`gh secret set -f .env.local` でまとめて入る）。
 
 ## 制限
 
 - Toggl の `/me` 系 API は 1 時間あたり 30 回まで（更新 1 回で 1 回、設定の保存で 3 回使います）
-- 開始より 24 時間以上前から計測し続けている記録は数えられません
+- カウント開始より 24 時間以上前から計測し続けている記録は数えられません
 - 自動精算は1分おきの定期実行なので、締切から実際の課金まで最大1分ほどずれます

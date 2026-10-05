@@ -41,7 +41,7 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
 
   const batch = getFirestore().batch();
   for (const session of targets) {
-    // 締切を過ぎた分は数えないので、締切後は値が動かない
+    // カウント開始より前と締切より後は数えないので、締切後は値が動かない
     const trackedSec = trackedSeconds(
       entries,
       {

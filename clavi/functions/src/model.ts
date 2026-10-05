@@ -4,7 +4,7 @@
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
 //   users/{uid}/sessions/{id}  … Session（本人も読める）
-// 時刻はすべて epoch ms。
+// 時刻（〜At, due など）は epoch ms。入力欄の値をそのまま持つ LastInput だけは日付・時刻の文字列。
 
 export interface Settings {
   /** Toggl のタグ名（入力補完用） */

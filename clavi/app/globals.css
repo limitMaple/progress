@@ -224,7 +224,7 @@ dialog.confirm h2 { margin: 0 0 4px; font-size: 13px; }
 .confirm-label { color: var(--muted); font-size: 12px; width: 100%; }
 .confirm-day { font-size: 18px; font-weight: 600; }
 .confirm-clock { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-/* 今日ではない締切（時刻が過ぎていて翌日扱い、など）は色で目立たせる */
+/* 今日ではない締切は、日付の取り違えに気づけるよう色で目立たせる */
 .confirm-deadline.not-today { outline: 2px solid var(--warn); }
 .confirm-deadline.not-today .confirm-day { color: var(--warn); }
 
