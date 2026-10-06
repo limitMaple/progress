@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   trackedSeconds, localDateTime, sessionTitle, formatDuration, formatDay, formatDeadline,
-} from '../src/progress.js';
-import type { TimeEntry } from '../src/model.js';
+} from '../src/progress.ts';
+import type { TimeEntry } from '../src/model.ts';
 
 const at = (hhmm: string) => new Date(`2026-09-16T${hhmm}:00`).getTime();
 const iso = (hhmm: string) => new Date(at(hhmm)).toISOString();

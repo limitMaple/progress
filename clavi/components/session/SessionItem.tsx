@@ -3,11 +3,11 @@
 import { deleteDoc, doc } from "firebase/firestore";
 import { db, settleNow } from "@/lib/firebase";
 import { formatDuration, formatDeadline } from "@/functions/src/progress";
-import type { ChargeResolution, Session, SessionStatus } from "@/functions/src/model";
+import type { ChargeResolution } from "@/functions/src/model";
+import type { DisplayStatus, Session } from "@/functions/src/session";
 import { targetLabel, type Message } from "@/components/session/common";
 
-// settling は「締切を過ぎた active」（精算を待っている）の表示用
-const STATUS_LABELS: Record<SessionStatus | "settling", string> = {
+const STATUS_LABELS: Record<DisplayStatus, string> = {
     active: "進行中",
     settling: "精算待ち",
     done: "達成",
@@ -23,12 +23,10 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
     setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;
 }) {
-    const status = session.status === "active" && now >= session.due ? "settling" : session.status;
+    const status = session.displayStatus(now);
     const remainingTime = session.due - now;
-    const ratio = Math.min(1, session.trackedSec / session.requiredSec);
     const left = session.requiredSec - session.trackedSec;
-    // 課金 API の途中で失敗して、課金されたか分からない。人が Beeminder の履歴で確かめる
-    const unresolved = Boolean(session.chargeRequestedAt) && !session.charge && now >= session.due;
+    const unresolved = session.isChargeUnknown;
 
     async function settle(resolve?: ChargeResolution) {
         if (busy) return;
@@ -55,17 +53,15 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
                 <span className={`badge ${status}`}>{STATUS_LABELS[status]}</span>
             </div>
             <div className="deadline muted">
-                {/* カウント開始を指定したセッションだけ出す（指定しなければ作成時刻と同じ） */}
-                {session.startAt !== session.createdAt ? `${formatDeadline(session.startAt, now)}〜` : ""}
+                {/* カウント開始を指定したセッションだけ出す */}
+                {session.hasCustomStart ? `${formatDeadline(session.startAt, now)}〜` : ""}
                 {`締切 ${formatDeadline(session.due, now)}`}
                 {session.status === "active" && remainingTime > 0 ? `（残り${formatDuration(remainingTime / 1000)}）` : ""}
                 {` ・ $${session.dollars} ・ ${targetLabel(session)}`}
             </div>
-            <div className="bar"><div className="fill" style={{ width: `${ratio * 100}%` }} /></div>
+            <div className="bar"><div className="fill" style={{ width: `${session.progressRatio * 100}%` }} /></div>
             <div className="session-foot">
-                <span className="amount">
-                    {`${formatDuration(session.trackedSec)} / ${formatDuration(session.requiredSec)}`}
-                </span>
+                <span className="amount">{session.progressLabel()}</span>
                 {/* 「あと0分」と出ないよう、残りは分単位で切り上げる */}
                 <span>{left > 0 ? `あと${formatDuration(Math.ceil(left / 60) * 60)}` : "達成"}</span>
             </div>
@@ -87,7 +83,7 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
                 {session.status === "error" && !unresolved && (
                     <button type="button" className="link" onClick={() => settle()} disabled={busy}>精算する</button>
                 )}
-                {(session.status === "done" || session.status === "charged") && (
+                {session.isSettled && (
                     <button
                         type="button"
                         className="link"

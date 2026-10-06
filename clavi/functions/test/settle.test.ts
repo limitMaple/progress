@@ -4,10 +4,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase-admin/app';
-import { settleSession, settleManually } from '../src/settle.js';
-import { syncSessions } from '../src/sync.js';
-import { claimSettlement, sessionsRef, userRef, secretRef } from '../src/store.js';
-import type { Session, TimeEntry } from '../src/model.js';
+import { settleSession, settleManually } from '../src/settle.ts';
+import { syncSessions } from '../src/sync.ts';
+import { claimSettlement, sessionsRef, userRef, secretRef, ConflictError } from '../src/store.ts';
+import { Session } from '../src/session.ts';
+import type { SessionData, TimeEntry } from '../src/model.ts';
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
   throw new Error('Firestore エミュレーターの中で動かしてください（clavi で npm test）');
@@ -23,6 +24,8 @@ const HOUR = 60 * MIN;
 let togglEntries: TimeEntry[];
 let togglFails: boolean;
 let togglCalls: number;
+// 設定すると、Toggl の応答をこれが解決するまで待たせる
+let togglGate: Promise<void> | null;
 let chargeFails: 'network' | 'http' | null;
 let charges: Record<string, string>[];
 
@@ -30,6 +33,7 @@ beforeEach(() => {
   togglEntries = [];
   togglFails = false;
   togglCalls = 0;
+  togglGate = null;
   chargeFails = null;
   charges = [];
 });
@@ -44,6 +48,7 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
   const { host, pathname } = new URL(url);
   if (host === 'api.track.toggl.com') {
     togglCalls += 1;
+    if (togglGate) await togglGate;
     if (togglFails) throw new Error('getaddrinfo ENOTFOUND');
     return json(togglEntries);
   }
@@ -61,12 +66,12 @@ globalThis.fetch = async (input: string | URL | Request, init: RequestInit = {})
 let seq = 0;
 
 /** 新しいユーザーとセッションを 1 件作る。テストごとに別の uid にして干渉させない。 */
-async function setup(overrides: Partial<Session> = {}) {
+async function setup(overrides: Partial<SessionData> = {}) {
   const uid = `user${++seq}-${Date.now()}`;
   const now = Date.now();
   await userRef(uid).set({ beeminderUser: 'alice' });
   await secretRef(uid).set({ togglToken: 'toggl', beeminderToken: 'bee' });
-  const session: Session = {
+  const session = new Session({
     id: `session-${seq}-abcdefgh`,
     title: '作業 1時間00分',
     projectId: null,
@@ -87,9 +92,10 @@ async function setup(overrides: Partial<Session> = {}) {
     chargeRequestedAt: null,
     measuredSec: null,
     ...overrides,
-  };
+  });
   await sessionsRef(uid).doc(session.id).set(session);
-  return { uid, session };
+  // 保存するには読んだときの版が要るので、読み直したものを返す
+  return { uid, session: await read(uid, session.id) };
 }
 
 /** 保存されているセッション。無ければテストを失敗させる。 */
@@ -216,6 +222,24 @@ test('同時に権利を取れるのは 1 つだけ', async () => {
   assert.equal(claims.filter(Boolean).length, 1);
 });
 
+test('ロックが切れて別の精算が取ったら、元の精算は何も書かず、課金もしない', async () => {
+  const { uid, session } = await setup();
+  togglEntries = [entry(session.createdAt, 30)];
+  const first = await claimSettlement(uid, session.id);
+  assert.ok(first);
+  // first の精算が長引いてロックが切れ、別の精算が取った
+  await sessionsRef(uid).doc(session.id).update({ claimedAt: Date.now() - 10 * MIN });
+  const second = await claimSettlement(uid, session.id);
+  assert.ok(second);
+
+  await assert.rejects(settleSession(uid, first), ConflictError);
+  assert.equal(charges.length, 0);
+
+  const result = await settleSession(uid, second);
+  assert.equal(result.status, 'charged');
+  assert.equal(charges.length, 1);
+});
+
 // ---- 画面からの精算 ----
 
 test('締切前の精算は、ロックを残さずに断る', async () => {
@@ -258,7 +282,7 @@ test('「課金されていなかった」なら、最初に測った値でも�
 
 // ---- 同期 ----
 
-test('締切後の同期では、後から足した記録で達成にならない', async () => {
+test('締切後のセッションは同期で触らない（後から足した記録で達成にならない。測るのは精算）', async () => {
   const { uid, session } = await setup();
   togglEntries = [entry(session.createdAt, 70)];
 
@@ -266,7 +290,8 @@ test('締切後の同期では、後から足した記録で達成にならな�
 
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'active');
-  assert.equal(saved.trackedSec, 70 * 60);
+  assert.equal(saved.trackedSec, 0);
+  assert.equal(togglCalls, 0);
 });
 
 test('プロジェクトを指定したセッションは、そのプロジェクトの記録だけで判定する', async () => {
@@ -300,4 +325,20 @@ test('締切前の同期では、達していれば done にする', async () =>
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'done');
   assert.equal(saved.checkAt, null);
+});
+
+test('Toggl を待っている間にセッションが書き換えられたら、同期は上書きしない', async () => {
+  const { uid, session } = await setup({ due: Date.now() + HOUR, checkAt: Date.now() + HOUR });
+  togglEntries = [entry(session.createdAt, 70)];
+  let release!: () => void;
+  togglGate = new Promise((resolve) => { release = resolve; });
+
+  const sync = syncSessions(uid);
+  // Toggl の応答を待っている間に、ほかの処理が書き換えた
+  while (togglCalls === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+  await sessionsRef(uid).doc(session.id).update({ status: 'charged' });
+  release();
+
+  await assert.rejects(sync, ConflictError);
+  assert.equal((await read(uid, session.id)).status, 'charged');
 });

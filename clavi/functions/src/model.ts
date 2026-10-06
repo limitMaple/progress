@@ -3,7 +3,7 @@
 //
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
-//   users/{uid}/sessions/{id}  … Session（本人も読める）
+//   users/{uid}/sessions/{id}  … SessionData（本人も読める。振る舞いは session.ts の Session クラス）
 // 時刻（〜At, due など）は epoch ms。
 
 export interface Settings {
@@ -43,7 +43,7 @@ export type SessionStatus = 'active' | 'done' | 'charged' | 'error';
 /** カウント開始を過去にできる限度。Toggl から取る記録の範囲が広がりすぎないようにする */
 export const MAX_START_PAST_MS = 30 * 24 * 60 * 60 * 1000;
 
-interface SettleState {
+export interface SettleState {
   attempts: number;
   /** 自動で再試行する予定の時刻。予定がなければ null */
   retryAt: number | null;
@@ -59,8 +59,8 @@ export interface ChargeRecord {
   manual: boolean;
 }
 
-/** 「締切までに指定の時間やる」という 1 件の約束。 */
-export interface Session {
+/** 「締切までに指定の時間やる」という 1 件の約束の、保存する形。扱うときは session.ts の Session にする。 */
+export interface SessionData {
   id: string;
   title: string;
   /** 数える Toggl のプロジェクト。null ならプロジェクトで絞らない */

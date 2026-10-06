@@ -1,7 +1,7 @@
 // Toggl Track API v9 と Beeminder API v1 の薄いクライアント。
 // トークンを外に出さないため、呼ぶのは Cloud Functions だけ。
 
-import type { TimeEntry } from './model.js';
+import type { TimeEntry } from './model.ts';
 
 const TOGGL_BASE = 'https://api.track.toggl.com/api/v9';
 const BEEMINDER_BASE = 'https://www.beeminder.com/api/v1';
@@ -11,11 +11,14 @@ function apiError(service: string, status: number, detail: string): Error {
   return new Error(`${service}: ${detail}${status ? ` (HTTP ${status})` : ''}`);
 }
 
+// 応答が来ないまま待ち続けて、精算のロックが切れるまで居座らないようにする
+const TIMEOUT = 20 * 1000;
+
 /** 通信して、レスポンスと本文（JSON として読めなければ文字列のまま）を返す。 */
 async function request(service: string, url: string, init: RequestInit) {
   let res: Response;
   try {
-    res = await fetch(url, init);
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT) });
   } catch (err) {
     throw apiError(service, 0, `通信に失敗しました（${(err as Error).message}）`);
   }

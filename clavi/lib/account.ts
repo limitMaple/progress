@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { DEFAULT_SETTINGS, type Session, type Settings } from "@/functions/src/model";
+import { DEFAULT_SETTINGS, type SessionData, type Settings } from "@/functions/src/model";
+import { Session } from "@/functions/src/session";
 
 /** ログイン中のユーザー。確認中は undefined、未ログインは null。 */
 export function useUser() {
@@ -27,7 +28,7 @@ export function useSessions(uid: string) {
     const [sessions, setSessions] = useState<Session[]>([]);
     useEffect(() => onSnapshot(
         query(collection(db, "users", uid, "sessions"), orderBy("createdAt", "desc")),
-        (snap) => setSessions(snap.docs.map((d) => d.data() as Session)),
+        (snap) => setSessions(snap.docs.map((d) => new Session(d.data() as SessionData))),
     ), [uid]);
     return sessions;
 }
