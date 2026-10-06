@@ -172,17 +172,22 @@ export const autoSettle = onSchedule(
   async () => {
     const snap = await allSessions().where('checkAt', '<=', Date.now() + LOOKAHEAD).get();
 
-    await Promise.all(snap.docs.map(async (doc) => {
+    // 1 件の失敗（ConflictError など）で、ほかのセッションの精算を止めない
+    await Promise.allSettled(snap.docs.map(async (doc) => {
       // users/{uid}/sessions/{id} の uid
       const uid = doc.ref.parent.parent!.id;
-      const session = await claimSettlement(uid, doc.id);
-      if (!session) return;
+      try {
+        const session = await claimSettlement(uid, doc.id);
+        if (!session) return;
 
-      const wait = session.settleTime() - Date.now();
-      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        const wait = session.settleTime() - Date.now();
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 
-      const result = await settleSession(uid, session);
-      logger.info('settled', { uid, id: session.id, status: result.status });
+        const result = await settleSession(uid, session);
+        logger.info('settled', { uid, id: session.id, status: result.status });
+      } catch (err) {
+        logger.error('settle failed', { uid, id: doc.id, err });
+      }
     }));
   },
 );

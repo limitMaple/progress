@@ -6,9 +6,9 @@
 // 人が Beeminder の履歴を確かめて settleManually で決着をつける。
 // （Beeminder の課金 API には、同じ依頼を 1 回分として扱う仕組みがない）
 
-import { loadAccount, sessionsRef, claimSettlement, saveChanges } from './store.ts';
+import { loadAccount, sessionsRef, claimSettlement, saveChanges, ConflictError } from './store.ts';
 import { beeminderClient } from './api.ts';
-import { syncSessions } from './sync.ts';
+import { fetchTimeEntries } from './sync.ts';
 import type { ChargeResolution, SettleResult } from './model.ts';
 import type { Session } from './session.ts';
 
@@ -28,21 +28,24 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
   let chargeRequested = false;
 
   try {
+    const { settings, tokens } = await loadAccount(uid);
     // 締切後に一度測った値があればそれを使う。測り直すと、あとから Toggl に足した記録まで数えてしまう
     let trackedSec = session.measuredSec;
     if (trackedSec == null) {
-      trackedSec = ((await syncSessions(uid, [session.id])).synced[0] ?? session).trackedSec;
+      if (!tokens.togglToken) throw new Error('TogglのAPIトークンが未設定です');
+      const now = Date.now();
+      trackedSec = session.measure(await fetchTimeEntries(tokens.togglToken, [session], now), now);
+      session.progress(trackedSec, now);
       session.recordMeasured(trackedSec);
       await saveChanges(ref, session);
     }
-    // sync は締切後に達成にしないので、届いたかはここで見る
+    // progress は締切後に達成にしないので、届いたかはここで見る
     if (trackedSec >= session.requiredSec) {
       session.settleAsDone(trackedSec);
       await saveChanges(ref, session);
       return resultOf(session);
     }
 
-    const { settings, tokens } = await loadAccount(uid);
     if (!tokens.beeminderToken) throw new Error('BeeminderのAPIトークンが未設定です');
 
     session.requestCharge(Date.now());
@@ -62,6 +65,8 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
     await saveChanges(ref, session);
     return resultOf(session);
   } catch (err) {
+    // ほかの処理が先に書き換えていた（ロックが切れて別の精算が取ったなど）。こちらはもう何も書かない
+    if (err instanceof ConflictError) throw err;
     // 結果（達成・課金済み）が出たあとの保存に失敗したのなら、どちらも何もせず、残っている結果を保存し直す。
     // これも失敗したら例外のまま上に返す（chargeRequestedAt が立っているので、再び課金されることはない）
     const { message } = err as Error;
