@@ -26,8 +26,6 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
   const ref = sessionsRef(uid).doc(session.id);
   // 課金 API を呼んだか。呼んだあとで失敗したら、課金し直さずに人の確認を待つ
   let chargeRequested = false;
-  // 課金 API が成功したか。そのあと保存に失敗したら、保存だけやり直す
-  let charged = false;
 
   try {
     // 締切後に一度測った値があればそれを使う。測り直すと、あとから Toggl に足した記録まで数えてしまう
@@ -55,7 +53,6 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
       amount: session.dollars,
       note: session.chargeNote(),
     });
-    charged = true;
     session.settleAsCharged(trackedSec, {
       id: String(result?.id ?? ''),
       amount: Number(result?.amount ?? session.dollars),
@@ -65,13 +62,11 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
     await saveChanges(ref, session);
     return resultOf(session);
   } catch (err) {
-    // 課金が通ったあとなら、残っている変更（課金済み）の保存だけをやり直す。これも失敗したら例外のまま上に返す
-    // （chargeRequestedAt が立っているので、再び課金されることはない）
-    if (!charged) {
-      const { message } = err as Error;
-      if (chargeRequested) session.stopForReview(message);
-      else session.retryLater(message, Date.now());
-    }
+    // 結果（達成・課金済み）が出たあとの保存に失敗したのなら、どちらも何もせず、残っている結果を保存し直す。
+    // これも失敗したら例外のまま上に返す（chargeRequestedAt が立っているので、再び課金されることはない）
+    const { message } = err as Error;
+    if (chargeRequested) session.stopForReview(message);
+    else session.retryLater(message, Date.now());
     await saveChanges(ref, session);
     return resultOf(session);
   }

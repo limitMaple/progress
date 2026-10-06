@@ -121,3 +121,21 @@ test('精算の結果: 課金済み・達成・人の確認待ちは、どれも
   assert.equal(review.status, 'error');
   assert.equal(manual.charge?.manual, true);
 });
+
+test('結果が出たあとなら、retryLater / stopForReview は何もしない（結果の保存をやり直す）', () => {
+  const done = start();
+  done.settleAsDone(3600);
+  done.retryLater('write failed', NOW);
+  assert.equal(done.status, 'done');
+  assert.equal(done.settle?.message, '達成しました（1時間00分）。課金はありません。');
+  assert.equal(done.changes.status, 'done');
+  assert.equal(done.checkAt, null);
+
+  const charged = start();
+  charged.requestCharge(NOW);
+  charged.settleAsCharged(600, { id: 'c', amount: 5, at: NOW, manual: false });
+  charged.stopForReview('write failed');
+  assert.equal(charged.status, 'charged');
+  assert.equal(charged.charge?.id, 'c');
+  assert.equal(charged.changes.status, 'charged');
+});

@@ -184,8 +184,10 @@ export class Session extends recordClass<SessionData>() {
   /**
    * 課金の前に失敗した。1 分後にやり直し、MAX_ATTEMPTS 回目なら status を 'error' にして止める。
    * 課金 API は呼んでいないので、requestCharge の印は（保存に失敗して残っていても）消す。
+   * 結果が出たあとで、その保存に失敗したのなら何もしない（残っている結果を保存し直せばよい）。
    */
   retryLater(error: string, now: number): void {
+    if (this.isSettled) return;
     const attempts = this.nextAttempt;
     this.change({ chargeRequestedAt: null });
     if (attempts >= MAX_ATTEMPTS) {
@@ -205,8 +207,12 @@ export class Session extends recordClass<SessionData>() {
     });
   }
 
-  /** 課金 API の途中で失敗した。課金されたか分からないので、人が確かめるまで止める。 */
+  /**
+   * 課金 API の途中で失敗した。課金されたか分からないので、人が確かめるまで止める。
+   * 課金できたあとで、その記録の保存に失敗したのなら何もしない（残っている記録を保存し直せばよい）。
+   */
   stopForReview(error: string): void {
+    if (this.isSettled) return;
     this.stop(
       `課金されたか分かりません（${error}）。`
       + 'Beeminderの課金履歴を確かめて、画面から「課金されていた / いなかった」を選んでください。',
