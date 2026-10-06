@@ -1,7 +1,9 @@
 // Firestore の読み書き。データの形は model.ts を参照。
 
 import { getFirestore } from 'firebase-admin/firestore';
-import type { DocumentData, FirestoreDataConverter, WithFieldValue } from 'firebase-admin/firestore';
+import type {
+  DocumentData, DocumentReference, FirestoreDataConverter, WithFieldValue,
+} from 'firebase-admin/firestore';
 import { DEFAULT_SETTINGS } from './model.ts';
 import type { SessionData, Settings, Tokens } from './model.ts';
 import { Session } from './session.ts';
@@ -31,6 +33,18 @@ export const sessionsRef = (uid: string) =>
 export const allSessions = () =>
   getFirestore().collectionGroup('sessions').withConverter(sessionConverter);
 
+export type SessionRef = DocumentReference<Session, SessionData>;
+
+/**
+ * Session の変わった項目だけを保存する。同時に動くほかの処理が書いた項目は潰さない。
+ * 保存に失敗したら変更は残るので、もう一度呼べばやり直せる。
+ */
+export async function saveChanges(ref: SessionRef, session: Session): Promise<void> {
+  const changes = session.changes;
+  if (Object.keys(changes).length) await ref.update(changes);
+  session.clearChanges();
+}
+
 export async function loadAccount(uid: string): Promise<{ settings: Settings; tokens: Tokens }> {
   const [user, secret] = await Promise.all([userRef(uid).get(), secretRef(uid).get()]);
   return {
@@ -55,7 +69,9 @@ export async function claimSettlement(
     const session = (await tx.get(ref)).data();
     const now = Date.now();
     if (!session?.isClaimable(now, { resolving })) return null;
-    tx.update(ref, { claimedAt: now });
-    return session.with({ claimedAt: now });
+    session.claim(now);
+    tx.update(ref, session.changes);
+    session.clearChanges();
+    return session;
   });
 }

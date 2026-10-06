@@ -40,14 +40,13 @@ export async function syncSessions(uid: string, ids?: readonly string[]): Promis
   const batch = getFirestore().batch();
   for (const session of targets) {
     // 締切より後は数えないので、締切後は値が動かない
-    const patch = session.progress(session.measure(entries, now), now);
-    batch.update(sessionsRef(uid).doc(session.id), patch);
-
-    const updated = session.with(patch);
-    result.synced.push(updated);
-    if (updated.status === 'done') result.done.push(updated);
+    session.progress(session.measure(entries, now), now);
+    batch.update(sessionsRef(uid).doc(session.id), session.changes);
+    result.synced.push(session);
+    if (session.status === 'done') result.done.push(session);
   }
 
   await batch.commit();
+  for (const session of targets) session.clearChanges();
   return result;
 }

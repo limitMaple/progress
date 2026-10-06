@@ -1,5 +1,9 @@
 // セッション（「締切までに指定の時間やる」という 1 件の約束）の振る舞い。
 // 保存する形は model.ts の SessionData。Web アプリからも import するので、Node に依存しないこと。
+//
+// 状態を変えるメソッド（「状態の移り変わり」の節）は自身を書き換え、変えた項目を覚えておく。
+// 保存は store.ts の saveChanges で、変わった項目だけを update する（同時に動くほかの処理の書き込みを潰さない）。
+// 画面は表示用のメソッドだけを使い、状態を変えるメソッドは呼ばないこと（React の state を書き換えてしまう）。
 
 import { formatDuration, sessionTitle, trackedSeconds } from './progress.ts';
 import type {
@@ -17,19 +21,19 @@ const MAX_ATTEMPTS = 3;
 /** 表示用の状態。settling は「締切を過ぎた active」（精算を待っている）。 */
 export type DisplayStatus = SessionStatus | 'settling';
 
-/** 保存する差分。状態を変えるメソッドはこれを返し、呼ぶ側が Firestore の update に渡す。 */
-export type SessionPatch = Partial<SessionData>;
-
-/** data の項目を、そのまま読み取り専用のプロパティとして持つクラスの土台（項目を 2 か所に書かないため）。 */
+/** data の項目を、そのままプロパティとして持つクラスの土台（項目を 2 か所に書かないため）。 */
 function recordClass<T extends object>() {
   return class {
     constructor(data: T) {
       Object.assign(this, data);
     }
-  } as new (data: T) => Readonly<T>;
+  } as new (data: T) => T;
 }
 
 export class Session extends recordClass<SessionData>() {
+  // # の項目は列挙されないので、Firestore に保存する項目（{ ...session }）には入らない
+  #changes: Partial<SessionData> = {};
+
   /** 新しく始めるセッション。now は作成時刻。 */
   static start({ id, now, project, tag, requiredSec, startAt, due, dollars }: {
     id: string;
@@ -65,9 +69,19 @@ export class Session extends recordClass<SessionData>() {
     });
   }
 
-  /** 一部を書き換えた新しいセッション（自身は変えない）。 */
-  with(patch: SessionPatch): Session {
-    return new Session({ ...this, ...patch });
+  /** まだ保存していない変更。 */
+  get changes(): Partial<SessionData> {
+    return { ...this.#changes };
+  }
+
+  /** 変更を保存し終えたら呼ぶ。 */
+  clearChanges(): void {
+    this.#changes = {};
+  }
+
+  private change(patch: Partial<SessionData>): void {
+    Object.assign(this, patch);
+    Object.assign(this.#changes, patch);
   }
 
   /** 次に精算する時刻。再試行の予定があればそれ、なければ締切の少し後。 */
@@ -110,33 +124,48 @@ export class Session extends recordClass<SessionData>() {
     return `Toggl Ratchet: ${this.title} (${this.id.slice(0, 8)})`;
   }
 
-  // ---- 状態の移り変わり（どれも保存する差分を返す。自身は変えない） ----
+  // ---- 状態の移り変わり（自身を書き換える。保存は saveChanges） ----
+
+  /** 精算に取りかかる（ロックを取る）。取れるかは isClaimable で確かめてから。 */
+  claim(now: number): void {
+    this.change({ claimedAt: now });
+  }
 
   /**
    * Toggl で測った進捗。締切前に作業時間へ届いていれば達成にする。
    * 締切後は達成にしない。Toggl には過去の時刻で記録を足せるので、締切後に足した記録で
    * 課金を逃れられてしまう。締切後の判定は精算（settleAs〜）だけが行う。
    */
-  progress(trackedSec: number, now: number): SessionPatch {
-    const patch: SessionPatch = { trackedSec, updatedAt: now };
-    return trackedSec >= this.requiredSec && now < this.due
-      ? { ...patch, status: 'done', checkAt: null }
-      : patch;
+  progress(trackedSec: number, now: number): void {
+    this.change({ trackedSec, updatedAt: now });
+    if (trackedSec >= this.requiredSec && now < this.due) {
+      this.change({ status: 'done', checkAt: null });
+    }
+  }
+
+  /** 精算で最初に測った作業時間を残す。再試行ではこれを使い、Toggl を測り直さない。 */
+  recordMeasured(trackedSec: number): void {
+    this.change({ measuredSec: trackedSec });
   }
 
   /** 課金 API を呼ぶ直前の印。これより後で失敗したら、課金されたか分からない状態になる。 */
-  requestCharge(now: number): SessionPatch {
-    return { chargeRequestedAt: now, checkAt: null };
+  requestCharge(now: number): void {
+    this.change({ chargeRequestedAt: now, checkAt: null });
+  }
+
+  /** 人が Beeminder の履歴で「課金されていなかった」と確かめた。印を消して、精算をやり直せるようにする。 */
+  clearChargeRequest(): void {
+    this.change({ chargeRequestedAt: null });
   }
 
   /** 精算した結果、作業時間に届いていた。 */
-  settleAsDone(trackedSec: number): SessionPatch {
-    return this.finish('done', `達成しました（${formatDuration(trackedSec)}）。課金はありません。`);
+  settleAsDone(trackedSec: number): void {
+    this.finish('done', `達成しました（${formatDuration(trackedSec)}）。課金はありません。`);
   }
 
   /** 精算した結果、届いていなかったので課金した。 */
-  settleAsCharged(trackedSec: number, charge: ChargeRecord): SessionPatch {
-    return this.finish(
+  settleAsCharged(trackedSec: number, charge: ChargeRecord): void {
+    this.finish(
       'charged',
       `届きませんでした（${this.progressLabel(trackedSec)}）。$${this.dollars}を課金しました。`,
       charge,
@@ -144,23 +173,28 @@ export class Session extends recordClass<SessionData>() {
   }
 
   /** 課金されたか分からなかったものを、人が Beeminder の履歴で確かめて「課金されていた」とした。 */
-  settleAsChargedManually(now: number): SessionPatch {
-    return this.finish(
+  settleAsChargedManually(now: number): void {
+    this.finish(
       'charged',
       `課金済みとして記録しました（Beeminderの履歴で確認, $${this.dollars}）。`,
       { id: '', amount: this.dollars, at: now, manual: true },
     );
   }
 
-  /** 課金の前に失敗した。1 分後にやり直し、MAX_ATTEMPTS 回目なら status を 'error' にして止める。 */
-  retryLater(error: string, now: number): SessionPatch {
+  /**
+   * 課金の前に失敗した。1 分後にやり直し、MAX_ATTEMPTS 回目なら status を 'error' にして止める。
+   * 課金 API は呼んでいないので、requestCharge の印は（保存に失敗して残っていても）消す。
+   */
+  retryLater(error: string, now: number): void {
     const attempts = this.nextAttempt;
+    this.change({ chargeRequestedAt: null });
     if (attempts >= MAX_ATTEMPTS) {
-      return this.stop(`精算に失敗しました: ${error}`);
+      this.stop(`精算に失敗しました: ${error}`);
+      return;
     }
     const retryAt = now + RETRY_DELAY;
     // 締切後の処理なので status は変えない
-    return {
+    this.change({
       settle: {
         attempts,
         retryAt,
@@ -168,12 +202,12 @@ export class Session extends recordClass<SessionData>() {
       },
       checkAt: retryAt,
       claimedAt: null,
-    };
+    });
   }
 
   /** 課金 API の途中で失敗した。課金されたか分からないので、人が確かめるまで止める。 */
-  stopForReview(error: string): SessionPatch {
-    return this.stop(
+  stopForReview(error: string): void {
+    this.stop(
       `課金されたか分かりません（${error}）。`
       + 'Beeminderの課金履歴を確かめて、画面から「課金されていた / いなかった」を選んでください。',
     );
@@ -183,23 +217,23 @@ export class Session extends recordClass<SessionData>() {
     return (this.settle?.attempts ?? 0) + 1;
   }
 
-  private finish(status: 'done' | 'charged', message: string, charge: ChargeRecord | null = null): SessionPatch {
-    return {
+  private finish(status: 'done' | 'charged', message: string, charge: ChargeRecord | null = null): void {
+    this.change({
       status,
       charge,
       settle: { attempts: this.nextAttempt, retryAt: null, message },
       checkAt: null,
       claimedAt: null,
-    };
+    });
   }
 
-  private stop(message: string): SessionPatch {
-    return {
+  private stop(message: string): void {
+    this.change({
       status: 'error',
       settle: { attempts: this.nextAttempt, retryAt: null, message },
       checkAt: null,
       claimedAt: null,
-    };
+    });
   }
 
   // ---- 表示用 ----

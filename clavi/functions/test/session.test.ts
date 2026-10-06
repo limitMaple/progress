@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../src/session.ts';
+import type { SessionData } from '../src/model.ts';
 
 const MIN = 60 * 1000;
 const NOW = new Date('2026-09-16T12:00:00').getTime();
@@ -9,6 +10,9 @@ const start = () => Session.start({
   id: 'abcdefgh-1234', now: NOW, project: { id: 1, name: '資格' }, tag: '過去問',
   requiredSec: 3600, startAt: NOW, due: NOW + 120 * MIN, dollars: 5,
 });
+
+/** start() の一部の項目を変えたセッション。 */
+const make = (data: Partial<SessionData>) => new Session({ ...start(), ...data });
 
 test('start は active で、締切の少し後に精算を予定する', () => {
   const s = start();
@@ -20,35 +24,39 @@ test('start は active で、締切の少し後に精算を予定する', () => 
   assert.equal(s.hasCustomStart, false);
 });
 
-test('with は元のセッションを変えずに、書き換えたものを返す', () => {
+
+test('状態を変えるメソッドは自身を書き換え、変えた項目を changes に覚える', () => {
   const s = start();
-  const t = s.with({ trackedSec: 1800 });
-  assert.ok(t instanceof Session);
-  assert.equal(s.trackedSec, 0);
-  assert.equal(t.trackedSec, 1800);
-  assert.equal(t.progressRatio, 0.5);
-  assert.equal(t.progressLabel(), '30分 / 1時間00分');
+  s.progress(1800, NOW);
+  assert.equal(s.trackedSec, 1800);
+  assert.equal(s.progressRatio, 0.5);
+  assert.equal(s.progressLabel(), '30分 / 1時間00分');
+  assert.deepEqual(s.changes, { trackedSec: 1800, updatedAt: NOW });
+  // 覚えている変更は Firestore に保存する項目（{ ...session }）には入らない
+  assert.equal(Object.keys({ ...s }).includes('changes'), false);
+  assert.equal(Object.keys({ ...s }).length, Object.keys(start()).length);
+  s.clearChanges();
+  assert.deepEqual(s.changes, {});
 });
 
 test('締切を過ぎた active は「精算待ち」として見せる', () => {
   const s = start();
   assert.equal(s.displayStatus(NOW), 'active');
   assert.equal(s.displayStatus(s.due), 'settling');
-  assert.equal(s.with({ status: 'charged' }).displayStatus(s.due), 'charged');
+  assert.equal(make({ status: 'charged' }).displayStatus(s.due), 'charged');
 });
 
 test('isClaimable: 精算済み・ロック中・課金されたか分からないものは取れない', () => {
-  const s = start();
-  assert.equal(s.isClaimable(NOW), true);
-  assert.equal(s.with({ status: 'done' }).isClaimable(NOW), false);
-  assert.equal(s.with({ claimedAt: NOW - MIN }).isClaimable(NOW), false);
-  assert.equal(s.with({ claimedAt: NOW - 10 * MIN }).isClaimable(NOW), true);
+  assert.equal(start().isClaimable(NOW), true);
+  assert.equal(make({ status: 'done' }).isClaimable(NOW), false);
+  assert.equal(make({ claimedAt: NOW - MIN }).isClaimable(NOW), false);
+  assert.equal(make({ claimedAt: NOW - 10 * MIN }).isClaimable(NOW), true);
 
-  const unknown = s.with({ status: 'error', chargeRequestedAt: NOW });
+  const unknown = make({ status: 'error', chargeRequestedAt: NOW });
   assert.equal(unknown.isChargeUnknown, true);
   assert.equal(unknown.isClaimable(NOW), false);
   assert.equal(unknown.isClaimable(NOW, { resolving: true }), true);
-  const charged = unknown.with({ charge: { id: 'c', amount: 5, at: NOW, manual: false } });
+  const charged = make({ status: 'error', chargeRequestedAt: NOW, charge: { id: 'c', amount: 5, at: NOW, manual: false } });
   assert.equal(charged.isChargeUnknown, false);
   assert.equal(charged.isClaimable(NOW, { resolving: true }), false);
 });
@@ -58,38 +66,58 @@ test('chargeNote は ID の頭を入れる', () => {
 });
 
 test('progress: 締切前に届けば達成、締切後は届いていても達成にしない', () => {
-  const s = start();
-  assert.deepEqual(s.progress(1800, NOW), { trackedSec: 1800, updatedAt: NOW });
-  assert.equal(s.progress(3600, NOW).status, 'done');
-  assert.equal(s.progress(3600, s.due).status, undefined);
+  const before = start();
+  before.progress(3600, NOW);
+  assert.equal(before.status, 'done');
+  assert.equal(before.checkAt, null);
+
+  const after = start();
+  after.progress(3600, after.due);
+  assert.equal(after.status, 'active');
 });
 
 test('retryLater: 2 回までは status を変えずに予定し、3 回目で error にして止める', () => {
-  let s = start().with({ status: 'active' });
+  const s = start();
   for (const attempts of [1, 2]) {
-    const patch = s.retryLater('boom', NOW);
-    assert.equal(patch.status, undefined);
-    assert.equal(patch.settle?.attempts, attempts);
-    assert.equal(patch.checkAt, NOW + MIN);
-    s = s.with(patch);
+    s.retryLater('boom', NOW);
+    assert.equal(s.status, 'active');
+    assert.equal(s.settle?.attempts, attempts);
+    assert.equal(s.checkAt, NOW + MIN);
     assert.equal(s.settleTime(), NOW + MIN);
   }
-  const last = s.retryLater('boom', NOW);
-  assert.equal(last.status, 'error');
-  assert.equal(last.settle?.attempts, 3);
-  assert.equal(last.checkAt, null);
-  assert.match(last.settle?.message ?? '', /精算に失敗しました: boom/);
+  s.retryLater('boom', NOW);
+  assert.equal(s.status, 'error');
+  assert.equal(s.settle?.attempts, 3);
+  assert.equal(s.checkAt, null);
+  assert.match(s.settle?.message ?? '', /精算に失敗しました: boom/);
+});
+
+test('retryLater: 保存できなかった課金の印は消す（課金 API は呼んでいない）', () => {
+  const s = start();
+  s.requestCharge(NOW);
+  s.retryLater('boom', NOW);
+  assert.equal(s.chargeRequestedAt, null);
+  assert.equal(s.changes.chargeRequestedAt, null);
 });
 
 test('精算の結果: 課金済み・達成・人の確認待ちは、どれもロックと予定を外す', () => {
-  const s = start().with({ claimedAt: NOW, checkAt: NOW });
-  const charged = s.settleAsCharged(600, { id: 'c', amount: 5, at: NOW, manual: false });
+  const charged = make({ claimedAt: NOW, checkAt: NOW });
+  charged.settleAsCharged(600, { id: 'c', amount: 5, at: NOW, manual: false });
   assert.equal(charged.status, 'charged');
   assert.equal(charged.settle?.message, '届きませんでした（10分 / 1時間00分）。$5を課金しました。');
-  for (const patch of [charged, s.settleAsDone(3600), s.stopForReview('x'), s.settleAsChargedManually(NOW)]) {
-    assert.equal(patch.claimedAt, null);
-    assert.equal(patch.checkAt, null);
+
+  const done = make({ claimedAt: NOW, checkAt: NOW });
+  done.settleAsDone(3600);
+  const review = make({ claimedAt: NOW, checkAt: NOW });
+  review.stopForReview('x');
+  const manual = make({ claimedAt: NOW, checkAt: NOW });
+  manual.settleAsChargedManually(NOW);
+
+  for (const s of [charged, done, review, manual]) {
+    assert.equal(s.claimedAt, null);
+    assert.equal(s.checkAt, null);
   }
-  assert.equal(s.stopForReview('x').status, 'error');
-  assert.equal(s.settleAsChargedManually(NOW).charge?.manual, true);
+  assert.equal(done.status, 'done');
+  assert.equal(review.status, 'error');
+  assert.equal(manual.charge?.manual, true);
 });
