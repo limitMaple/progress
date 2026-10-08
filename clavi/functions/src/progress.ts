@@ -1,0 +1,86 @@
+// 進捗計算と表示用の純粋関数。Web アプリからも import するので、Node に依存しないこと。
+
+import type { TimeEntry } from './model.ts';
+
+/**
+ * Toggl の time entry のうち、[from, to) に重なる部分の合計秒数を返す。
+ * projectId を指定した場合はそのプロジェクトの記録だけ、tag を指定した場合はそのタグが付いた
+ * 記録だけを数える。両方指定したら両方を満たす記録だけ。
+ * 計測中の記録（stop が null）は now まで続いているものとして扱う。
+ */
+export function trackedSeconds(
+  entries: readonly TimeEntry[],
+  { from, to, tag, projectId }: { from: number; to: number; tag?: string; projectId?: number | null },
+  now: number,
+): number {
+  let totalMs = 0;
+  for (const entry of entries) {
+    if (projectId != null && entry.project_id !== projectId) continue;
+    if (tag && !(entry.tags ?? []).includes(tag)) continue;
+    const start = Date.parse(entry.start);
+    const stop = entry.stop
+      ? Date.parse(entry.stop)
+      : entry.duration < 0
+        ? now
+        : start + entry.duration * 1000;
+    const overlap = Math.min(stop, to) - Math.max(start, from);
+    if (overlap > 0) totalMs += overlap;
+  }
+  return Math.floor(totalMs / 1000);
+}
+
+/**
+ * 日付 "YYYY-MM-DD" と時刻 "HH:MM" を時刻（ms）にする。時刻が空ならその日の 0:00。
+ * 日付が空、または形が正しくなければ null。
+ * 実行環境のタイムゾーンで解釈するので、ブラウザで呼ぶこと（Functions は UTC で動く）。
+ */
+export function localDateTime(date: string, time: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (time && !/^\d{2}:\d{2}$/.test(time)) return null;
+  // 時差の無い "YYYY-MM-DDTHH:MM" は、実行環境のタイムゾーンの時刻として解釈される
+  const ms = new Date(`${date}T${time || '00:00'}`).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** セッションの名前。「資格 / 過去問 2時間00分」「作業 45分」の形。確認画面とサーバーで同じものを使う。 */
+export function sessionTitle(
+  { projectName, tag, requiredSec }: { projectName: string; tag: string; requiredSec: number },
+): string {
+  const target = [projectName, tag].filter(Boolean).join(' / ') || '作業';
+  return `${target} ${formatDuration(requiredSec)}`;
+}
+
+/** 秒数を「1時間05分」「45分」の形にする（分未満は切り捨て）。 */
+export function formatDuration(sec: number): string {
+  const totalMin = Math.max(0, Math.floor(sec / 60));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}時間${pad(m)}分` : `${m}分`;
+}
+
+/** 日付を now から見た「今日」「明日」「9/18」の形にする。 */
+export function formatDay(ms: number, now: number): string {
+  const dayDiff = Math.round((startOfDay(ms) - startOfDay(now)) / 86400000);
+  if (dayDiff === 0) return '今日';
+  if (dayDiff === 1) return '明日';
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** 時刻を「23:30」「明日 1:00」「9/18 8:00」の形にする（今日なら日付を省く）。 */
+export function formatDeadline(ms: number, now: number): string {
+  const d = new Date(ms);
+  const clock = `${d.getHours()}:${pad(d.getMinutes())}`;
+  const day = formatDay(ms, now);
+  return day === '今日' ? clock : `${day} ${clock}`;
+}
+
+function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}

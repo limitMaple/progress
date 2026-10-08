@@ -1,86 +1,263 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;:root{
-                      --bg:#ffffff;
-                      --surface:#fbfbff;
-                      --accent:#6b46c1; /* 紫 */
-                      --accent-2:#8b5cf6;
-                      --muted:#6b7280;
-                      --card-shadow: 0 6px 18px rgba(99,102,241,0.08);
-                      --glass: rgba(107,70,193,0.06);
-                      --radius:12px;
-                      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-                    }
-
-
-*{box-sizing:border-box}
-html,body{height:100%}
-body{
-  margin:0;
-  background:linear-gradient(180deg, #fff 0%, #fbf7ff 100%);
-  color:#0f172a;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
-  display:flex;align-items:center;justify-content:left;padding:32px;
+:root {
+  --bg: #ffffff;
+  --surface: #f4f5f7;
+  --text: #1d1f23;
+  --muted: #6b7079;
+  --border: #d9dce1;
+  --accent: #2f6fed;
+  --accent-text: #ffffff;
+  --ok: #1f8a4c;
+  --warn: #b25e09;
+  --error: #c62f2f;
+  color-scheme: light;
 }
 
-
-.app{
-  width:100%;max-width:1100px;background:var(--surface);border-radius:18px;box-shadow:var(--card-shadow);overflow:hidden;display:grid;grid-template-columns:360px 1fr;min-height:560px;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1d21;
+    --surface: #26292e;
+    --text: #e7e9ec;
+    --muted: #9aa0a8;
+    --border: #3a3e45;
+    --accent: #5b8ff5;
+    --accent-text: #ffffff;
+    --ok: #4cc27f;
+    --warn: #e9a04b;
+    --error: #ef6b6b;
+    color-scheme: dark;
+  }
 }
 
+* { box-sizing: border-box; }
 
-/* Left column */
-.sidebar{background:linear-gradient(180deg, rgba(107,70,193,0.06), transparent);padding:28px;display:flex;flex-direction:column;gap:20px}
-.brand{display:flex;gap:12px;align-items:center}
-.logo{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
-.brand h1{font-size:18px;margin:0}
-.brand p{margin:0;font-size:13px;color:var(--muted)}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+}
 
+.page {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 16px 32px;
+}
 
-.nav{display:flex;flex-direction:column;gap:8px;margin-top:10px}
-.nav button{background:transparent;border:0;padding:10px;border-radius:10px;text-align:left;color:var(--muted);cursor:pointer}
-.nav button.active{background:linear-gradient(90deg, rgba(139,92,246,0.08), rgba(107,70,193,0.06));color:var(--accent);font-weight:600}
+h1 { font-size: 17px; margin: 0; }
+h2 { font-size: 13px; margin: 20px 0 8px; color: var(--muted); font-weight: 600; }
 
+input, select, button, .button { font: inherit; color: inherit; }
 
-.profile{margin-top:auto;display:flex;gap:12px;align-items:center}
-.avatar{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));display:flex;align-items:center;justify-content:center;color:#fff}
+input, select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
+button, .button {
+  display: inline-block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.5;
+}
+button:disabled { opacity: .5; cursor: default; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  padding: 8px 12px;
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  text-decoration: underline;
+}
 
-/* Main content */
-.main{padding:28px}
-.header{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.header h2{margin:0}
-.header .controls{display:flex;gap:8px;align-items:center}
-.btn{background:var(--accent);color:#fff;padding:10px 14px;border-radius:10px;border:0;cursor:pointer}
-.btn.ghost{background:transparent;color:var(--accent);border:1px solid rgba(107,70,193,0.12)}
+a { color: var(--accent); }
 
+.muted { color: var(--muted); }
+.notice {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  white-space: pre-line;
+}
+.notice.error { color: var(--error); }
+.notice.ok { color: var(--ok); }
 
-/* Login */
-.login-panel{max-width:420px;margin:0 auto;padding:28px;border-radius:14px;background:linear-gradient(180deg,#fff,#fbf7ff);box-shadow:0 8px 30px rgba(107,70,193,0.06)}
-.form-group{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
-input[type=text],input[type=password],textarea,select{padding:12px;border:1px solid #e6e6f0;border-radius:10px;font-size:14px}
-label{font-size:13px;color:var(--muted)}
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.actions { display: flex; align-items: center; gap: 8px; }
+.app-header .home { color: inherit; text-decoration: none; }
 
+/* 見出しの右にボタンを置く行（セッション一覧の「更新」など） */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 20px 0 8px;
+}
+.section-head h2 { margin: 0; }
 
-/* Task list */
-.toolbar{display:flex;gap:8px;align-items:center}
-.search{flex:1}
-.card{background:#fff;border-radius:12px;padding:14px;box-shadow:var(--card-shadow);border:1px solid rgba(99,102,241,0.03)}
-.task{display:flex;align-items:center;justify-content:space-between;padding:12px;border-radius:10px;border:1px solid #f1f1f6;margin-bottom:10px}
-.task .left{display:flex;gap:12px;align-items:center}
-.checkbox{width:18px;height:18px;border-radius:6px;border:2px solid #e8e8f6;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
-.checkbox.checked{background:linear-gradient(135deg,var(--accent),var(--accent-2));border:0;color:#fff}
-.meta{font-size:12px;color:var(--muted)}
+/* ---- ログイン ---- */
 
+.login {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 40px;
+}
 
-/* Create form */
-.form-columns{display:grid;grid-template-columns:1fr 160px;gap:12px}
+/* ---- セッション一覧 ---- */
 
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-/* Responsive */
-@media (max-width:900px){
-  .app{grid-template-columns:1fr}
-  .sidebar{order:2}
-  .main{order:1}
+.session {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.session-head, .session-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.title { font-weight: 600; overflow-wrap: anywhere; }
+.amount { font-variant-numeric: tabular-nums; }
+.deadline, .updated, .auto-check { font-size: 12px; }
+.auto-check { margin-top: 2px; }
+
+.badge {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.active { color: var(--accent); }
+.badge.done { color: var(--ok); }
+.badge.charged { color: var(--error); }
+.badge.settling, .badge.error { color: var(--warn); }
+
+.bar {
+  height: 6px;
+  margin: 6px 0 4px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.fill { height: 100%; background: var(--accent); }
+.session.done .fill { background: var(--ok); }
+.session.charged .fill { background: var(--error); }
+.session.error .fill { background: var(--warn); }
+
+/* ---- 新しいセッション ---- */
+
+.session-form { display: flex; flex-direction: column; gap: 10px; }
+.session-form label {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  align-items: center;
+}
+.session-form label > span:first-child { color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* 入力欄の下の補足。ラベルの列の分だけ右に寄せる */
+.field-note { margin: -6px 0 0 88px; font-size: 12px; }
+@media (max-width: 600px) {
+  .field-note { margin-left: 0; }
+}
+input.num { width: 64px; }
+.session-form input[list], .session-form select { width: 100%; }
+
+.hint { margin: 0; font-size: 12px; min-height: 18px; }
+.hint.error { color: var(--error); }
+
+/* ---- 開始前の確認画面 ---- */
+
+dialog.confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+dialog.confirm::backdrop { background: rgb(0 0 0 / .45); }
+dialog.confirm h2 { margin: 0 0 4px; font-size: 13px; }
+.confirm-title { margin: 0 0 14px; font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+
+/* 締切は取り違えやすいので、いちばん大きく見せる */
+.confirm-deadline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.confirm-label { color: var(--muted); font-size: 12px; width: 100%; }
+.confirm-day { font-size: 18px; font-weight: 600; }
+.confirm-clock { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+/* 今日ではない締切は、日付の取り違えに気づけるよう色で目立たせる */
+.confirm-deadline.not-today { outline: 2px solid var(--warn); }
+.confirm-deadline.not-today .confirm-day { color: var(--warn); }
+
+.confirm-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 14px 0;
+}
+.confirm-list dt { color: var(--muted); }
+.confirm-list dd { margin: 0; overflow-wrap: anywhere; }
+
+.confirm-warning { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* ---- 設定 ---- */
+
+.settings form { display: flex; flex-direction: column; gap: 16px; }
+.settings label { display: flex; flex-direction: column; gap: 4px; }
+.settings label > span { font-weight: 600; }
+.settings input { width: 100%; }
+.settings input.num { width: 100px; }
+.buttons { display: flex; gap: 8px; }
+
+.note { margin-top: 24px; }
+.note p { margin: 0; color: var(--muted); }
+code {
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* iOS で入力欄に触れたときに拡大されないよう、スマホでは 16px にする */
+@media (max-width: 600px) {
+  input, select { font-size: 16px; }
 }

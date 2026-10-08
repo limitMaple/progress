@@ -1,12 +1,5 @@
-import { redirect } from "next/navigation";
-import { getAuth } from "firebase/auth";
-import { app } from "@/lib/firebase";
+import Sessions from "@/components/Sessions";
 
 export default function HomePage() {
-    const auth = getAuth(app);
-    if (!auth.currentUser) {
-        redirect("/login");
-    } else {
-        redirect("/tasks");
-    }
+    return <Sessions />;
 }
