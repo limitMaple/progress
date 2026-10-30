@@ -17,6 +17,12 @@ service cloud.firestore {
         // （active と error は精算待ちなので、消して課金から逃げられないようにする）
         allow delete: if isOwner(uid) && resource.data.status in ['done', 'charged'];
       }
+
+      match /schedules/{id} {
+        allow read: if isOwner(uid);
+        // スケジュールはいつでも消せる（作ったあとのセッションは残る。休むのは Functions から）
+        allow delete: if isOwner(uid);
+      }
     }
   }
 }

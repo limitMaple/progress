@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "test": "tsc && node --test \"lib/test/*.test.js\"",
-    "test:unit": "tsc && node --test lib/test/progress.test.js"
+    "test:unit": "tsc && node --test lib/test/progress.test.js lib/test/session.test.js lib/test/schedule.test.js"
   },
   "dependencies": {
     "firebase-admin": "^14.4.0",

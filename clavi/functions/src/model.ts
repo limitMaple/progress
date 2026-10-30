@@ -4,6 +4,7 @@
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
 //   users/{uid}/sessions/{id}  … SessionData（本人も読める。振る舞いは session.ts の Session クラス）
+//   users/{uid}/schedules/{id} … ScheduleData（本人も読める。計算は schedule.ts）
 // 時刻（〜At, due など）は epoch ms。
 
 export interface Settings {
@@ -91,6 +92,38 @@ export interface SessionData {
   chargeRequestedAt: number | null;
   /** 精算で最初に測った作業時間。再試行ではこれを使い、Toggl を測り直さない */
   measuredSec: number | null;
+  /** スケジュールから作ったなら、そのスケジュールの ID（スケジュールより前に作ったセッションには無い） */
+  scheduleId?: string | null;
+}
+
+/**
+ * 繰り返しの約束。各回のカウント開始の時刻に、その回のセッションを作る（scheduler.ts）。
+ * 時刻はすべて timeZone で読む（日付は "YYYY-MM-DD"、〜Minutes はその日の 0:00 からの分）。
+ */
+export interface ScheduleData {
+  id: string;
+  /** 数える Toggl のプロジェクト。null ならプロジェクトで絞らない */
+  projectId: number | null;
+  projectName: string;
+  tag: string;
+  requiredSec: number;
+  dollars: number;
+  /** カウント開始する曜日（0 が日曜） */
+  weekdays: number[];
+  startMinutes: number;
+  /** 開始の時刻以前なら、翌日の締切 */
+  dueMinutes: number;
+  /** IANA のタイムゾーン名（作った画面のもの） */
+  timeZone: string;
+  createdAt: number;
+  /** まだセッションを作っていない最初の回の日付。曜日がなければ null */
+  nextDate: string | null;
+  /** その回のカウント開始。定期実行はこれを見て探す */
+  nextStartAt: number | null;
+  /** 休む回の日付 */
+  skipDates: string[];
+  /** 最後にセッションを作れなかった理由。作れたら空 */
+  message: string;
 }
 
 /** Toggl の time entry のうち、進捗の計算に使う部分。 */
@@ -125,6 +158,28 @@ export interface StartSessionRequest {
   startAt: number | null;
   due: number;
   dollars: number;
+}
+
+export interface CreateScheduleRequest {
+  projectId: number | null;
+  tag: string;
+  requiredSec: number;
+  dollars: number;
+  weekdays: number[];
+  startMinutes: number;
+  dueMinutes: number;
+  timeZone: string;
+}
+
+export interface CreateScheduleResponse {
+  id: string;
+}
+
+/** その日の回を休む（skip が false なら休みをやめる）。カウント開始より前だけ。 */
+export interface SkipScheduleRequest {
+  id: string;
+  date: string;
+  skip: boolean;
 }
 
 export interface StartSessionResponse {

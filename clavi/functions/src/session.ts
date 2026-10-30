@@ -35,7 +35,7 @@ export class Session extends recordClass<SessionData>() {
   #changes: Partial<SessionData> = {};
 
   /** 新しく始めるセッション。now は作成時刻。 */
-  static start({ id, now, project, tag, requiredSec, startAt, due, dollars }: {
+  static start({ id, now, project, tag, requiredSec, startAt, due, dollars, scheduleId = null }: {
     id: string;
     now: number;
     project: TogglProject | null;
@@ -44,6 +44,8 @@ export class Session extends recordClass<SessionData>() {
     startAt: number;
     due: number;
     dollars: number;
+    /** スケジュールから作るときだけ */
+    scheduleId?: string | null;
   }): Session {
     const projectName = project?.name ?? '';
     return new Session({
@@ -66,6 +68,7 @@ export class Session extends recordClass<SessionData>() {
       claimedAt: null,
       chargeRequestedAt: null,
       measuredSec: null,
+      scheduleId,
     });
   }
 

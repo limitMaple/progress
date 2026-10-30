@@ -5,7 +5,7 @@ import type {
   DocumentData, DocumentReference, FirestoreDataConverter, Timestamp, WithFieldValue, WriteBatch,
 } from 'firebase-admin/firestore';
 import { DEFAULT_SETTINGS } from './model.ts';
-import type { SessionData, Settings, Tokens } from './model.ts';
+import type { ScheduleData, SessionData, Settings, Tokens } from './model.ts';
 import { Session } from './session.ts';
 
 /** 型を付けるだけの変換。中身は Firestore に置いたそのまま。 */
@@ -58,6 +58,11 @@ export const sessionsRef = (uid: string) =>
 /** すべてのユーザーのセッション（定期実行が探すとき用） */
 export const allSessions = () =>
   getFirestore().collectionGroup('sessions').withConverter(sessionConverter);
+export const schedulesRef = (uid: string) =>
+  getFirestore().collection(`users/${uid}/schedules`).withConverter(typed<ScheduleData>());
+/** すべてのユーザーのスケジュール（定期実行が探すとき用） */
+export const allSchedules = () =>
+  getFirestore().collectionGroup('schedules').withConverter(typed<ScheduleData>());
 
 export type SessionRef = DocumentReference<Session, SessionData>;
 
