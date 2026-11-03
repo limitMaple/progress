@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { DEFAULT_SETTINGS, type SessionData, type Settings } from "@/functions/src/model";
+import { DEFAULT_SETTINGS, type ScheduleData, type SessionData, type Settings } from "@/functions/src/model";
 import { Session } from "@/functions/src/session";
+import { Schedule } from "@/functions/src/schedule";
 
 /** ログイン中のユーザー。確認中は undefined、未ログインは null。 */
 export function useUser() {
@@ -31,4 +32,14 @@ export function useSessions(uid: string) {
         (snap) => setSessions(snap.docs.map((d) => new Session(d.data() as SessionData))),
     ), [uid]);
     return sessions;
+}
+
+/** スケジュール一覧（古い順）。次の回の変化もそのまま反映される。 */
+export function useSchedules(uid: string) {
+    const [schedules, setSchedules] = useState<Schedule[]>([]);
+    useEffect(() => onSnapshot(
+        query(collection(db, "users", uid, "schedules"), orderBy("createdAt")),
+        (snap) => setSchedules(snap.docs.map((d) => new Schedule(d.data() as ScheduleData))),
+    ), [uid]);
+    return schedules;
 }

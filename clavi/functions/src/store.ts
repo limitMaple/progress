@@ -5,8 +5,9 @@ import type {
   DocumentData, DocumentReference, FirestoreDataConverter, Timestamp, WithFieldValue, WriteBatch,
 } from 'firebase-admin/firestore';
 import { DEFAULT_SETTINGS } from './model.ts';
-import type { SessionData, Settings, Tokens } from './model.ts';
+import type { ScheduleData, SessionData, Settings, Tokens } from './model.ts';
 import { Session } from './session.ts';
+import { Schedule } from './schedule.ts';
 
 /** 型を付けるだけの変換。中身は Firestore に置いたそのまま。 */
 function typed<T extends DocumentData>(): FirestoreDataConverter<T> {
@@ -15,6 +16,12 @@ function typed<T extends DocumentData>(): FirestoreDataConverter<T> {
     fromFirestore: (snap) => snap.data() as T,
   };
 }
+
+/** 読むときは Schedule にし、書くときはその項目をそのまま保存する。 */
+const scheduleConverter: FirestoreDataConverter<Schedule, ScheduleData> = {
+  toFirestore: (schedule) => ({ ...schedule }) as WithFieldValue<ScheduleData>,
+  fromFirestore: (snap) => new Schedule(snap.data() as ScheduleData),
+};
 
 /**
  * 読んだときの版（ドキュメントの updateTime）。保存するとき、読んでから誰も書き換えていないことを確かめるのに使う。
@@ -58,6 +65,11 @@ export const sessionsRef = (uid: string) =>
 /** すべてのユーザーのセッション（定期実行が探すとき用） */
 export const allSessions = () =>
   getFirestore().collectionGroup('sessions').withConverter(sessionConverter);
+export const schedulesRef = (uid: string) =>
+  getFirestore().collection(`users/${uid}/schedules`).withConverter(scheduleConverter);
+/** すべてのユーザーのスケジュール（定期実行が探すとき用） */
+export const allSchedules = () =>
+  getFirestore().collectionGroup('schedules').withConverter(scheduleConverter);
 
 export type SessionRef = DocumentReference<Session, SessionData>;
 

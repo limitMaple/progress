@@ -139,3 +139,21 @@ test('結果が出たあとなら、retryLater / stopForReview は何もしな�
   assert.equal(charged.charge?.id, 'c');
   assert.equal(charged.changes.status, 'charged');
 });
+
+test('取り消し: 期限より前の active だけ。取り消したら精算せず、一覧から消せる', () => {
+  // 期限の無いセッションは取り消せない
+  assert.equal(start().isCancelable(NOW), false);
+
+  const s = make({ startAt: NOW + 60 * MIN, cancelableUntil: NOW + 30 * MIN });
+  assert.equal(s.displayStatus(NOW), 'waiting');
+  assert.equal(s.isCancelable(NOW + 30 * MIN), false);
+  assert.throws(() => s.cancel(NOW + 30 * MIN), /期限を過ぎて/);
+
+  s.cancel(NOW);
+  assert.equal(s.status, 'canceled');
+  assert.equal(s.checkAt, null);
+  assert.equal(s.isSettled, true);
+  assert.equal(s.isClaimable(NOW), false);
+  assert.equal(s.isCancelable(NOW), false);
+  assert.equal(s.displayStatus(NOW + 200 * MIN), 'canceled');
+});

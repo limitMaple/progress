@@ -3,15 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { auth, syncNow } from "@/lib/firebase";
-import { useSessions, useSettings } from "@/lib/account";
+import { useSchedules, useSessions, useSettings } from "@/lib/account";
 import { useNow, type Message } from "@/components/session/common";
 import NewSessionForm from "@/components/session/NewSessionForm";
 import SessionItem from "@/components/session/SessionItem";
+import NewScheduleForm from "@/components/session/NewScheduleForm";
+import ScheduleItem from "@/components/session/ScheduleItem";
 
 export default function Sessions() {
     const uid = auth.currentUser!.uid;
     const settings = useSettings(uid);
     const sessions = useSessions(uid);
+    const schedules = useSchedules(uid);
     const now = useNow();
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<Message>({ text: "", kind: "" });
@@ -68,8 +71,36 @@ export default function Sessions() {
                 {sessions.length === 0 && <p className="muted">セッションはまだありません</p>}
             </section>
 
+            {schedules.length > 0 && (
+                <section>
+                    <h2>スケジュール</h2>
+                    <ul className="session-list">
+                        {schedules.map((schedule) => (
+                            <ScheduleItem
+                                key={schedule.id}
+                                uid={uid}
+                                schedule={schedule}
+                                now={now}
+                                setMessage={setMessage}
+                            />
+                        ))}
+                    </ul>
+                </section>
+            )}
+
             {settings && (
                 <NewSessionForm
+                    initialRequiredSec={settings.lastRequiredSec}
+                    projects={settings.projects}
+                    tags={settings.tags}
+                    disabled={busy || !hasTokens}
+                    setBusy={setBusy}
+                    setMessage={setMessage}
+                />
+            )}
+
+            {settings && (
+                <NewScheduleForm
                     initialRequiredSec={settings.lastRequiredSec}
                     projects={settings.projects}
                     tags={settings.tags}
