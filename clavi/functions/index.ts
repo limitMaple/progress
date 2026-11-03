@@ -14,7 +14,7 @@ import { syncSessions } from './src/sync.ts';
 import { settleSession, settleManually } from './src/settle.ts';
 import { togglClient, beeminderClient } from './src/api.ts';
 import { Session } from './src/session.ts';
-import { createScheduledSessions } from './src/scheduler.ts';
+import { generateSessions } from './src/generate.ts';
 import { Schedule, windowMinutes } from './src/schedule.ts';
 import { recurrenceFrom } from './src/recurrence.ts';
 import { isTimeZone } from './src/calendar.ts';
@@ -272,7 +272,7 @@ export const autoSettle = onSchedule(
 
 // ---- スケジュールからセッションを作る ----
 
-export const createScheduled = onSchedule(
+export const generateScheduledSessions = onSchedule(
   { schedule: 'every 1 minutes', timeZone: 'Asia/Tokyo', timeoutSeconds: 120 },
   async () => {
     const snap = await allSchedules().where('nextCreateAt', '<=', Date.now()).get();
@@ -282,7 +282,7 @@ export const createScheduled = onSchedule(
       // users/{uid}/schedules/{id} の uid
       const uid = doc.ref.parent.parent!.id;
       try {
-        const created = await createScheduledSessions(uid, doc.id);
+        const created = await generateSessions(uid, doc.id);
         if (created.length) logger.info('scheduled sessions created', { uid, schedule: doc.id, created });
       } catch (err) {
         logger.error('scheduled create failed', { uid, schedule: doc.id, err });

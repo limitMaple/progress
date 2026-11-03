@@ -2,13 +2,13 @@
 // 保存する形は model.ts の ScheduleData。Web アプリからも import するので、Node に依存しないこと。
 //
 // どの日が回の日かは Recurrence（recurrence.ts）が決め、ここはその日の時刻・締切・取り消せる期限を決める。
-// 各回のセッションは、取り消せる期限の CREATE_AHEAD 前に作っておく（作るのは scheduler.ts）。
+// 各回のセッションは、取り消せる期限の CREATE_AHEAD 前に作っておく（作るのは generate.ts）。
 // 休みたい回は、そのセッションを期限までに取り消す。作ったあとのセッションは手で始めたものと同じ。
 //
 // 日付は "YYYY-MM-DD"、時刻はその日の 0:00 からの分。どちらもスケジュールの timeZone で読む。
 
 import { formatDuration } from './progress.ts';
-import { addDays, zonedDate, zonedTime } from './calendar.ts';
+import { Temporal, zonedDate, zonedTime } from './calendar.ts';
 import { recordClass } from './record.ts';
 import { recurrenceFrom, type Recurrence } from './recurrence.ts';
 import { Session } from './session.ts';
@@ -73,7 +73,7 @@ export class Schedule extends recordClass<ScheduleData>() {
   occurrenceAt(date: string): Occurrence {
     const startAt = zonedTime(date, this.startMinutes, this.timeZone);
     // 夏時間の切り替わりの日でも締切がずれないよう、締切の日付と時刻から求める
-    const dueDate = this.dueMinutes > this.startMinutes ? date : addDays(date, 1);
+    const dueDate = this.dueMinutes > this.startMinutes ? date : Temporal.PlainDate.from(date).add({ days: 1 }).toString();
     return {
       date,
       startAt,
@@ -84,8 +84,9 @@ export class Schedule extends recordClass<ScheduleData>() {
 
   /** date 以降の回を早い順に。回がもう無ければそこで終わる（終わらないことが多いので、呼ぶ側で止めること）。 */
   *occurrences(date: string): Generator<Occurrence> {
-    for (let d = this.recurrence.firstOnOrAfter(date); d; d = this.recurrence.firstOnOrAfter(addDays(d, 1))) {
-      yield this.occurrenceAt(d);
+    const { recurrence } = this;
+    for (let d = recurrence.firstOnOrAfter(Temporal.PlainDate.from(date)); d; d = recurrence.firstOnOrAfter(d.add({ days: 1 }))) {
+      yield this.occurrenceAt(d.toString());
     }
   }
 
@@ -93,7 +94,8 @@ export class Schedule extends recordClass<ScheduleData>() {
   upcoming(after: number, count: number): Occurrence[] {
     const result: Occurrence[] = [];
     // after の前日から見る（タイムゾーンの日付の境目をまたいでも取りこぼさない）
-    for (const o of this.occurrences(addDays(zonedDate(after, this.timeZone), -1))) {
+    const dayBefore = Temporal.PlainDate.from(zonedDate(after, this.timeZone)).subtract({ days: 1 });
+    for (const o of this.occurrences(dayBefore.toString())) {
       if (result.length >= count) break;
       if (o.startAt > after) result.push(o);
     }
@@ -114,7 +116,7 @@ export class Schedule extends recordClass<ScheduleData>() {
   }
 
   /**
-   * now の時点で、セッションを作る時刻を迎えた回を片付ける（scheduler.ts が使う）。
+   * now の時点で、セッションを作る時刻を迎えた回を片付ける（generate.ts が使う）。
    *   create … セッションを作る回（締切を過ぎてしまった回は除く）
    *   next   … まだセッションを作る時刻になっていない最初の回
    * 定期実行が止まっていて何回分かたまっていても、締切前のものはすべて作る（取り消せる期限は過ぎているかもしれない）。

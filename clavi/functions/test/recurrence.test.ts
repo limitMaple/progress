@@ -4,21 +4,24 @@ import {
   DailyRecurrence, MonthlyByDayRecurrence, MonthlyByWeekdayRecurrence, WeeklyRecurrence, recurrenceFrom, weekdaysLabel,
 } from '../src/recurrence.ts';
 import type { Recurrence } from '../src/recurrence.ts';
-import { addDays } from '../src/calendar.ts';
+import { Temporal } from '../src/calendar.ts';
 
 // 2026-10-30 は金曜、2026-11-01 は日曜
 
 /** date から count 回分の日付。 */
 function dates(r: Recurrence, date: string, count: number): string[] {
   const result: string[] = [];
-  for (let d = r.firstOnOrAfter(date); d && result.length < count; d = r.firstOnOrAfter(addDays(d, 1))) result.push(d);
+  for (let d = first(r, date); d && result.length < count; d = r.firstOnOrAfter(d.add({ days: 1 }))) {
+    result.push(d.toString());
+  }
   return result;
 }
+const first = (r: Recurrence, date: string) => r.firstOnOrAfter(Temporal.PlainDate.from(date));
 
 test('N 日ごと: 起点から数え、起点より前は回にしない', () => {
   const r = new DailyRecurrence({ from: '2026-10-30', interval: 3 });
   assert.deepEqual(dates(r, '2026-10-01', 3), ['2026-10-30', '2026-11-02', '2026-11-05']);
-  assert.equal(r.firstOnOrAfter('2026-11-02'), '2026-11-02');
+  assert.equal(first(r, '2026-11-02')?.toString(), '2026-11-02');
   assert.equal(r.label, '3日ごと');
   assert.equal(new DailyRecurrence({ from: '2026-10-30', interval: 1 }).label, '毎日');
 });
@@ -52,7 +55,7 @@ test('毎月の日付: その日が無い月は飛ばす', () => {
   assert.equal(every2.label, '2か月ごと 15日');
 
   // 2 月だけの 30 日は無い
-  assert.equal(new MonthlyByDayRecurrence({ from: '2027-02-01', interval: 12, day: 30 }).firstOnOrAfter('2027-02-01'), null);
+  assert.equal(first(new MonthlyByDayRecurrence({ from: '2027-02-01', interval: 12, day: 30 }), '2027-02-01'), null);
 });
 
 test('毎月の第 N 曜日と、最後の曜日', () => {

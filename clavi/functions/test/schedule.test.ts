@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CREATE_AHEAD, Schedule, windowMinutes } from '../src/schedule.ts';
-import { addDays, weekdayOf, zonedDate, zonedTime } from '../src/calendar.ts';
+import { dateLabel, isDate, isTimeZone, zonedDate, zonedTime } from '../src/calendar.ts';
 import type { ScheduleData } from '../src/model.ts';
 
 const TOKYO = 'Asia/Tokyo';
@@ -42,8 +42,12 @@ test('タイムゾーンの日付と時刻', () => {
   // Asia/Tokyo の 8:00 は UTC では前日の 23:00
   assert.equal(zonedDate(jst('2026-10-30T08:00:00'), TOKYO), '2026-10-30');
   assert.equal(zonedDate(jst('2026-10-30T08:00:00'), 'UTC'), '2026-10-29');
-  assert.equal(weekdayOf('2026-10-30'), 5);
-  assert.equal(addDays('2026-12-31', 1), '2027-01-01');
+  assert.equal(dateLabel('2026-10-30'), '10/30（金）');
+  assert.equal(isDate('2026-02-28'), true);
+  assert.equal(isDate('2026-02-30'), false);
+  assert.equal(isDate('2026-2-28'), false);
+  assert.equal(isTimeZone('Asia/Tokyo'), true);
+  assert.equal(isTimeZone('Mars/Base'), false);
 });
 
 test('夏時間のあるタイムゾーンでも、壁時計の時刻どおりにする', () => {
@@ -54,6 +58,10 @@ test('夏時間のあるタイムゾーンでも、壁時計の時刻どおり�
   const s = make({ timeZone: ny, startMinutes: 0, dueMinutes: 23 * 60 });
   const o = s.occurrenceAt('2026-11-01');
   assert.equal(o.due - o.startAt, 24 * HOUR);
+  // 2026-03-08 は 2:00〜3:00 が無い。無い時刻は後ろへずらす
+  assert.equal(zonedTime('2026-03-08', 2 * 60 + 30, ny), Date.parse('2026-03-08T03:30:00-04:00'));
+  // 2026-11-01 は 1:00〜2:00 が 2 回ある。早いほうにする
+  assert.equal(zonedTime('2026-11-01', 90, ny), Date.parse('2026-11-01T01:30:00-04:00'));
 });
 
 test('回の時刻・締切・取り消せる期限', () => {

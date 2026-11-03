@@ -1,78 +1,58 @@
-// 日付とタイムゾーンの計算。Web アプリからも import するので、Node に依存しないこと。
-//
-// 日付は "YYYY-MM-DD"、時刻はその日の 0:00 からの分。どちらも呼ぶ側が渡すタイムゾーンで読む
-// （Functions は UTC で動くので、実行環境のタイムゾーンには頼らない）。
+// 日付とタイムゾーンの計算。中身は Temporal（標準になる予定の日時 API。今はポリフィル）に任せ、
+// ここは保存する形（日付 "YYYY-MM-DD"、時刻はその日の 0:00 からの分、epoch ms）との変換だけを持つ。
+// Web アプリからも import するので、Node に依存しないこと。
+// Functions は UTC で動くので、実行環境のタイムゾーンには頼らず、呼ぶ側がタイムゾーンを渡す。
 
-const MIN = 60 * 1000;
-const DAY = 24 * 60 * MIN;
+import { Temporal } from 'temporal-polyfill';
+
+export { Temporal };
+
 export const WEEKDAYS = '日月火水木金土';
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** 曜日を 0 が日曜の数にする（Temporal は 1 が月曜、7 が日曜。保存する形は 0 が日曜）。 */
+export function weekdayOf(date: Temporal.PlainDate): number {
+  return date.dayOfWeek % 7;
+}
 
 /** "YYYY-MM-DD" の形で、実在する日付か。 */
 export function isDate(value: string): boolean {
-  return DATE.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
-}
-
-/** タイムゾーンの名前として使えるか。 */
-export function isTimeZone(timeZone: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone });
+    Temporal.PlainDate.from(value, { overflow: 'reject' });
     return true;
   } catch {
     return false;
   }
 }
 
-/** "YYYY-MM-DD" の曜日（0 が日曜）。 */
-export function weekdayOf(date: string): number {
-  return new Date(`${date}T00:00:00Z`).getUTCDay();
-}
-
-/** "YYYY-MM-DD" の days 日後。 */
-export function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** from から to までの日数（to が前なら負）。 */
-export function daysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
+/** タイムゾーンの名前として使えるか。 */
+export function isTimeZone(timeZone: string): boolean {
+  try {
+    Temporal.Now.zonedDateTimeISO(timeZone);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 「10/30（金）」の形。 */
 export function dateLabel(date: string): string {
-  const [, m, d] = date.split('-').map(Number);
-  return `${m}/${d}（${WEEKDAYS[weekdayOf(date)]}）`;
+  const d = Temporal.PlainDate.from(date);
+  return `${d.month}/${d.day}（${WEEKDAYS[weekdayOf(d)]}）`;
 }
 
 /** 時刻 ms の、timeZone での日付 "YYYY-MM-DD"。 */
 export function zonedDate(ms: number, timeZone: string): string {
-  return new Date(ms + offsetOf(ms, timeZone)).toISOString().slice(0, 10);
+  return Temporal.Instant.fromEpochMilliseconds(ms).toZonedDateTimeISO(timeZone).toPlainDate().toString();
 }
 
-/** timeZone での日付 date の minutes 分（その日の 0:00 から）を、時刻 ms にする。 */
+/**
+ * timeZone での日付 date の minutes 分（その日の 0:00 から）を、時刻 ms にする。
+ * 夏時間の切り替わりで、その時刻が無い日は後ろへずらし、2 回ある日は早いほうにする（Temporal の 'compatible'）。
+ */
 export function zonedTime(date: string, minutes: number, timeZone: string): number {
-  const wall = new Date(`${date}T00:00:00Z`).getTime() + minutes * MIN;
-  // 壁時計の値から時差を引く。時差はその時刻で決まるので、求めた時刻の時差でもう一度合わせる
-  const guess = wall - offsetOf(wall, timeZone);
-  return wall - offsetOf(guess, timeZone);
-}
-
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
-/** 時刻 ms での timeZone の時差（壁時計 − UTC, ms）。 */
-function offsetOf(ms: number, timeZone: string): number {
-  let formatter = formatters.get(timeZone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone, hourCycle: 'h23',
-      year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
-    });
-    formatters.set(timeZone, formatter);
-  }
-  const part = Object.fromEntries(formatter.formatToParts(ms).map((p) => [p.type, Number(p.value)]));
-  const wall = Date.UTC(part.year, part.month - 1, part.day, part.hour, part.minute, part.second);
-  return wall - Math.floor(ms / 1000) * 1000;
+  const plainTime = new Temporal.PlainTime().add({ minutes });
+  return Temporal.PlainDate.from(date)
+    .toZonedDateTime({ timeZone, plainTime })
+    .epochMilliseconds;
 }

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase-admin/app';
-import { createScheduledSessions } from '../src/scheduler.ts';
+import { generateSessions } from '../src/generate.ts';
 import { saveChanges, schedulesRef, secretRef, sessionsRef, userRef } from '../src/store.ts';
 import { Schedule } from '../src/schedule.ts';
 
@@ -47,10 +47,10 @@ test('保存したスケジュールは Schedule として読める', async () =
 
 test('作る時刻を迎えた回のセッションを、取り消せる期限つきで 1 回だけ作る', async () => {
   const { uid, id } = await setup();
-  const created = await createScheduledSessions(uid, id, NOW);
+  const created = await generateSessions(uid, id, NOW);
   assert.deepEqual(created, [`${id}-20261030`]);
   // 同時に走っても、2 回目は作らない
-  assert.deepEqual(await createScheduledSessions(uid, id, NOW), []);
+  assert.deepEqual(await generateSessions(uid, id, NOW), []);
   assert.deepEqual(await sessionIds(uid), created);
 
   const session = (await sessionsRef(uid).doc(created[0]).get()).data()!;
@@ -65,12 +65,12 @@ test('作る時刻を迎えた回のセッションを、取り消せる期限�
   assert.equal(schedule.nextDate, '2026-11-02');
   assert.equal(schedule.nextCreateAt, jst('2026-11-01T08:00:00'));
   // 月曜の回は、日曜の 8:00 になるまで作らない
-  assert.deepEqual(await createScheduledSessions(uid, id, jst('2026-11-01T07:59:00')), []);
+  assert.deepEqual(await generateSessions(uid, id, jst('2026-11-01T07:59:00')), []);
 });
 
 test('期限までなら取り消せ、取り消した回は作り直さない', async () => {
   const { uid, id } = await setup();
-  const [sessionId] = await createScheduledSessions(uid, id, NOW);
+  const [sessionId] = await generateSessions(uid, id, NOW);
   const ref = sessionsRef(uid).doc(sessionId);
 
   const late = (await ref.get()).data()!;
@@ -86,13 +86,13 @@ test('期限までなら取り消せ、取り消した回は作り直さない',
 
   // 何かの拍子に同じ回をもう一度作ろうとしても、取り消したまま
   await schedulesRef(uid).doc(id).update({ nextDate: '2026-10-30', nextCreateAt: NOW });
-  assert.deepEqual(await createScheduledSessions(uid, id, NOW), []);
+  assert.deepEqual(await generateSessions(uid, id, NOW), []);
   assert.equal((await ref.get()).data()!.status, 'canceled');
 });
 
 test('Beeminder が未設定なら作らずに、理由を残して次の回へ進める', async () => {
   const { uid, id } = await setup({ beeminder: false });
-  assert.deepEqual(await createScheduledSessions(uid, id, NOW), []);
+  assert.deepEqual(await generateSessions(uid, id, NOW), []);
   const schedule = await readSchedule(uid, id);
   assert.equal(schedule.nextDate, '2026-11-02');
   assert.match(schedule.message, /10\/30（金）の回は、BeeminderのAPIトークンが未設定/);

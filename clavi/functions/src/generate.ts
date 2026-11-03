@@ -11,7 +11,7 @@ import { dateLabel } from './calendar.ts';
  * セッションを作る時刻を迎えた回のセッションを作り、次の回へ進める。作ったセッションの ID を返す。
  * Beeminder の設定が無ければ作らない（課金できない約束は始めない。startSession と同じ）。
  */
-export async function createScheduledSessions(uid: string, scheduleId: string, now = Date.now()): Promise<string[]> {
+export async function generateSessions(uid: string, scheduleId: string, now = Date.now()): Promise<string[]> {
   const { settings, tokens } = await loadAccount(uid);
   const canCharge = Boolean(tokens.beeminderToken && settings.beeminderUser);
   const ref = schedulesRef(uid).doc(scheduleId);

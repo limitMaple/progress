@@ -113,7 +113,7 @@ export type RecurrenceData =
   | { kind: 'monthlyByWeekday'; from: string; interval: number; week: number; weekday: number };
 
 /**
- * 繰り返しの約束。各回のセッションを、取り消せる期限より前もって作っておく（scheduler.ts）。
+ * 繰り返しの約束。各回のセッションを、取り消せる期限より前もって作っておく（generate.ts）。
  * 休みたい回は、そのセッションを期限までに取り消す。
  * 時刻はすべて timeZone で読む（日付は "YYYY-MM-DD"、〜Minutes はその日の 0:00 からの分）。
  */
