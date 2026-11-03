@@ -8,6 +8,8 @@ import type { StartSessionRequest, TogglProject } from "@/functions/src/model";
 import { useNow, targetLabel, type Message } from "@/components/session/common";
 import StartConfirmDialog from "@/components/session/StartConfirmDialog";
 
+const MIN = 60 * 1000;
+
 /** 確認画面に出す、開始しようとしている内容。 */
 export type Draft = StartSessionRequest & { projectName: string };
 
@@ -19,6 +21,8 @@ type FormValues = {
     startTime: string;
     deadlineDate: string;
     deadlineTime: string;
+    /** 取り消せる期限（カウント開始の何分前か）。空欄なら取り消せない */
+    cancelMinutes: string;
     hours: string;
     minutes: string;
     dollars: string;
@@ -33,6 +37,7 @@ function initialValues(requiredSec: number): FormValues {
         startTime: "",
         deadlineDate: "",
         deadlineTime: "",
+        cancelMinutes: "",
         hours: String(Math.floor(requiredSec / 3600)),
         minutes: String(Math.floor((requiredSec % 3600) / 60)),
         dollars: "0",
@@ -73,6 +78,7 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
         const startAt = values.startDate ? localDateTime(values.startDate, values.startTime) : null;
         const due = values.deadlineTime ? localDateTime(values.deadlineDate, values.deadlineTime) : null;
         const countFrom = startAt ?? now;
+        const cancelMinutes = values.cancelMinutes.trim() === "" ? null : Number(values.cancelMinutes);
 
         let error = "";
         if (values.startTime && !values.startDate) error = "カウント開始の日付を入力してください";
@@ -81,10 +87,14 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
         else if (startAt != null && startAt < now - MAX_START_PAST_MS) error = "カウント開始は30日前までにしてください";
         else if (requiredSec <= 0) error = "作業時間を入力してください";
         else if (amount < 1) error = "金額は$1以上にしてください";
-        else if (due - countFrom < requiredSec * 1000) {
+        else if (cancelMinutes != null && !(Number.isInteger(cancelMinutes) && cancelMinutes >= 0)) {
+            error = "取り消せる期限は、0以上の分で入力してください";
+        } else if (cancelMinutes != null && countFrom - cancelMinutes * MIN <= now) {
+            error = "取り消せる期限がもう過ぎています。カウント開始を先にするか、取り消しを空欄にしてください";
+        } else if (due - countFrom < requiredSec * 1000) {
             error = `カウント開始から締切まで${formatDuration((due - countFrom) / 1000)}しかありません`;
         }
-        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, startAt, due, error };
+        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, startAt, due, cancelMinutes, error };
     }
 
     /** 開始ボタン。すぐには始めず、確認画面を開く。 */
@@ -100,6 +110,7 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
             startAt: form.startAt,
             due: form.due,
             dollars: form.dollars,
+            cancelMinutes: form.cancelMinutes,
         });
     }
 
@@ -121,6 +132,7 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
                 startAt: draft.startAt,
                 due: draft.due,
                 dollars: draft.dollars,
+                cancelMinutes: draft.cancelMinutes,
             });
             setDraft(null);
             setMessage({ text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" });
@@ -172,6 +184,18 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
                     </span>
                 </label>
                 <p className="field-note muted">空欄なら開始した時刻から数えます。日付だけなら、その日の 0:00 から。</p>
+
+                <label>
+                    <span>取り消し</span>
+                    <span className="row">
+                        カウント開始の
+                        <input
+                            type="number" min="0" step="5" className="num" placeholder="—"
+                            value={values.cancelMinutes} onChange={change("cancelMinutes")}
+                        />分前まで
+                    </span>
+                </label>
+                <p className="field-note muted">空欄なら取り消せません。カウント開始が空欄（開始した時刻から）のときも取り消せません。</p>
 
                 <label>
                     <span>締切</span>

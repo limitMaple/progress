@@ -163,6 +163,7 @@ a { color: var(--accent); }
 .badge.done { color: var(--ok); }
 .badge.charged { color: var(--error); }
 .badge.settling, .badge.error { color: var(--warn); }
+.badge.waiting, .badge.canceled { color: var(--muted); }
 
 .bar {
   height: 6px;
@@ -175,6 +176,7 @@ a { color: var(--accent); }
 .session.done .fill { background: var(--ok); }
 .session.charged .fill { background: var(--error); }
 .session.error .fill { background: var(--warn); }
+.session.canceled .title { text-decoration: line-through; color: var(--muted); }
 
 /* ---- 新しいセッション ---- */
 

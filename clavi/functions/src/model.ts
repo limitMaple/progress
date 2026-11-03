@@ -4,7 +4,7 @@
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
 //   users/{uid}/sessions/{id}  … SessionData（本人も読める。振る舞いは session.ts の Session クラス）
-//   users/{uid}/schedules/{id} … ScheduleData（本人も読める。計算は schedule.ts）
+//   users/{uid}/schedules/{id} … ScheduleData（本人も読める。振る舞いは schedule.ts の Schedule クラス）
 // 時刻（〜At, due など）は epoch ms。
 
 export interface Settings {
@@ -39,7 +39,8 @@ export interface Tokens {
   beeminderToken: string;
 }
 
-export type SessionStatus = 'active' | 'done' | 'charged' | 'error';
+/** canceled は、取り消せる期限までに取り消したもの（精算しない） */
+export type SessionStatus = 'active' | 'done' | 'charged' | 'error' | 'canceled';
 
 /** カウント開始を過去にできる限度。Toggl から取る記録の範囲が広がりすぎないようにする */
 export const MAX_START_PAST_MS = 30 * 24 * 60 * 60 * 1000;
@@ -94,10 +95,26 @@ export interface SessionData {
   measuredSec: number | null;
   /** スケジュールから作ったなら、そのスケジュールの ID（スケジュールより前に作ったセッションには無い） */
   scheduleId?: string | null;
+  /** この時刻より前なら取り消せる。null なら取り消せない（解除期限より前に作ったセッションには無い） */
+  cancelableUntil?: number | null;
 }
 
 /**
- * 繰り返しの約束。各回のカウント開始の時刻に、その回のセッションを作る（scheduler.ts）。
+ * 繰り返しのきまり。どの日が回の日かを決める（振る舞いは recurrence.ts の各クラス）。
+ * from は起点の日付で、これより前は回にしない。interval 日・週・か月ごとの「ごと」も from から数える。
+ */
+export type RecurrenceData =
+  | { kind: 'daily'; from: string; interval: number }
+  /** weekdays は 0 が日曜 */
+  | { kind: 'weekly'; from: string; interval: number; weekdays: number[] }
+  /** その日が無い月（31日など）は飛ばす */
+  | { kind: 'monthlyByDay'; from: string; interval: number; day: number }
+  /** week は 1〜4、最後の週なら -1 */
+  | { kind: 'monthlyByWeekday'; from: string; interval: number; week: number; weekday: number };
+
+/**
+ * 繰り返しの約束。各回のセッションを、取り消せる期限より前もって作っておく（scheduler.ts）。
+ * 休みたい回は、そのセッションを期限までに取り消す。
  * 時刻はすべて timeZone で読む（日付は "YYYY-MM-DD"、〜Minutes はその日の 0:00 からの分）。
  */
 export interface ScheduleData {
@@ -108,20 +125,20 @@ export interface ScheduleData {
   tag: string;
   requiredSec: number;
   dollars: number;
-  /** カウント開始する曜日（0 が日曜） */
-  weekdays: number[];
+  /** どの日が回の日か */
+  repeat: RecurrenceData;
   startMinutes: number;
   /** 開始の時刻以前なら、翌日の締切 */
   dueMinutes: number;
+  /** 各回のセッションを取り消せるのは、カウント開始のこの分前まで */
+  cancelMinutes: number;
   /** IANA のタイムゾーン名（作った画面のもの） */
   timeZone: string;
   createdAt: number;
-  /** まだセッションを作っていない最初の回の日付。曜日がなければ null */
+  /** まだセッションを作っていない最初の回の日付。もう回が無ければ null */
   nextDate: string | null;
-  /** その回のカウント開始。定期実行はこれを見て探す */
-  nextStartAt: number | null;
-  /** 休む回の日付 */
-  skipDates: string[];
+  /** その回のセッションを作る時刻。定期実行はこれを見て探す */
+  nextCreateAt: number | null;
   /** 最後にセッションを作れなかった理由。作れたら空 */
   message: string;
 }
@@ -158,6 +175,8 @@ export interface StartSessionRequest {
   startAt: number | null;
   due: number;
   dollars: number;
+  /** カウント開始のこの分前まで取り消せる。null なら取り消せない */
+  cancelMinutes: number | null;
 }
 
 export interface CreateScheduleRequest {
@@ -165,9 +184,10 @@ export interface CreateScheduleRequest {
   tag: string;
   requiredSec: number;
   dollars: number;
-  weekdays: number[];
+  repeat: RecurrenceData;
   startMinutes: number;
   dueMinutes: number;
+  cancelMinutes: number;
   timeZone: string;
 }
 
@@ -175,11 +195,9 @@ export interface CreateScheduleResponse {
   id: string;
 }
 
-/** その日の回を休む（skip が false なら休みをやめる）。カウント開始より前だけ。 */
-export interface SkipScheduleRequest {
+/** セッションを取り消す。取り消せる期限より前だけ。 */
+export interface CancelSessionRequest {
   id: string;
-  date: string;
-  skip: boolean;
 }
 
 export interface StartSessionResponse {

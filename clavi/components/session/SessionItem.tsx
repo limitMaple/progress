@@ -1,18 +1,20 @@
 "use client";
 
 import { deleteDoc, doc } from "firebase/firestore";
-import { db, settleNow } from "@/lib/firebase";
+import { cancelSession, db, settleNow } from "@/lib/firebase";
 import { formatDuration, formatDeadline } from "@/functions/src/progress";
 import type { ChargeResolution } from "@/functions/src/model";
 import type { DisplayStatus, Session } from "@/functions/src/session";
 import { targetLabel, type Message } from "@/components/session/common";
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
+    waiting: "開始前",
     active: "進行中",
     settling: "精算待ち",
     done: "達成",
     charged: "課金済み",
     error: "要確認",
+    canceled: "取り消し",
 };
 
 export default function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
@@ -27,6 +29,7 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
     const remainingTime = session.due - now;
     const left = session.requiredSec - session.trackedSec;
     const unresolved = session.isChargeUnknown;
+    const cancelable = session.isCancelable(now);
 
     async function settle(resolve?: ChargeResolution) {
         if (busy) return;
@@ -39,6 +42,22 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
         try {
             const result = await settleNow({ id: session.id, resolve });
             setMessage({ text: result.message, kind: result.status === "error" ? "error" : "ok" });
+        } catch (err) {
+            setMessage({ text: (err as Error).message, kind: "error" });
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function cancel() {
+        if (busy) return;
+        if (!confirm(`「${session.title}」を取り消しますか？
+取り消したセッションは精算せず、課金もしません。`)) return;
+        setBusy(true);
+        setMessage({ text: "", kind: "" });
+        try {
+            await cancelSession({ id: session.id });
+            setMessage({ text: `「${session.title}」を取り消しました`, kind: "ok" });
         } catch (err) {
             setMessage({ text: (err as Error).message, kind: "error" });
         } finally {
@@ -65,6 +84,9 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
                 {/* 「あと0分」と出ないよう、残りは分単位で切り上げる */}
                 <span>{left > 0 ? `あと${formatDuration(Math.ceil(left / 60) * 60)}` : "達成"}</span>
             </div>
+            {cancelable && (
+                <div className="auto-check">{`${formatDeadline(session.cancelableUntil!, now)}まで取り消せます`}</div>
+            )}
             {session.settle?.message && <div className="auto-check">{session.settle.message}</div>}
             <div className="session-foot">
                 <span className="updated muted">
@@ -82,6 +104,9 @@ export default function SessionItem({ uid, session, now, busy, setBusy, setMessa
                 )}
                 {session.status === "error" && !unresolved && (
                     <button type="button" className="link" onClick={() => settle()} disabled={busy}>精算する</button>
+                )}
+                {cancelable && (
+                    <button type="button" className="link" onClick={cancel} disabled={busy}>取り消す</button>
                 )}
                 {session.isSettled && (
                     <button

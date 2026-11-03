@@ -6,6 +6,7 @@
 // 画面は表示用のメソッドだけを使い、状態を変えるメソッドは呼ばないこと（React の state を書き換えてしまう）。
 
 import { formatDuration, sessionTitle, trackedSeconds } from './progress.ts';
+import { recordClass } from './record.ts';
 import type {
   ChargeRecord, SessionData, SessionStatus, TimeEntry, TogglProject,
 } from './model.ts';
@@ -18,24 +19,15 @@ const CLAIM_TTL = 5 * 60 * 1000;
 const RETRY_DELAY = 60 * 1000;
 const MAX_ATTEMPTS = 3;
 
-/** 表示用の状態。settling は「締切を過ぎた active」（精算を待っている）。 */
-export type DisplayStatus = SessionStatus | 'settling';
-
-/** data の項目を、そのままプロパティとして持つクラスの土台（項目を 2 か所に書かないため）。 */
-function recordClass<T extends object>() {
-  return class {
-    constructor(data: T) {
-      Object.assign(this, data);
-    }
-  } as new (data: T) => T;
-}
+/** 表示用の状態。waiting は「カウント開始前の active」、settling は「締切を過ぎた active」（精算を待っている）。 */
+export type DisplayStatus = SessionStatus | 'waiting' | 'settling';
 
 export class Session extends recordClass<SessionData>() {
   // # の項目は列挙されないので、Firestore に保存する項目（{ ...session }）には入らない
   #changes: Partial<SessionData> = {};
 
   /** 新しく始めるセッション。now は作成時刻。 */
-  static start({ id, now, project, tag, requiredSec, startAt, due, dollars, scheduleId = null }: {
+  static start({ id, now, project, tag, requiredSec, startAt, due, dollars, scheduleId = null, cancelableUntil = null }: {
     id: string;
     now: number;
     project: TogglProject | null;
@@ -46,6 +38,8 @@ export class Session extends recordClass<SessionData>() {
     dollars: number;
     /** スケジュールから作るときだけ */
     scheduleId?: string | null;
+    /** この時刻より前なら取り消せる。null なら取り消せない */
+    cancelableUntil?: number | null;
   }): Session {
     const projectName = project?.name ?? '';
     return new Session({
@@ -69,6 +63,7 @@ export class Session extends recordClass<SessionData>() {
       chargeRequestedAt: null,
       measuredSec: null,
       scheduleId,
+      cancelableUntil,
     });
   }
 
@@ -101,9 +96,14 @@ export class Session extends recordClass<SessionData>() {
     );
   }
 
-  /** 精算が済んでいる（達成か課金済み）。一覧から消せるのはこれだけ。 */
+  /** 精算が済んでいる（達成か課金済み）か、取り消した。一覧から消せるのはこれだけ。 */
   get isSettled(): boolean {
-    return this.status === 'done' || this.status === 'charged';
+    return this.status === 'done' || this.status === 'charged' || this.status === 'canceled';
+  }
+
+  /** 取り消せるか。進行中で、取り消せる期限より前だけ。 */
+  isCancelable(now: number): boolean {
+    return this.status === 'active' && this.cancelableUntil != null && now < this.cancelableUntil;
   }
 
   /** 課金 API の途中で失敗して、課金されたか分からない。人が Beeminder の履歴で確かめる */
@@ -128,6 +128,12 @@ export class Session extends recordClass<SessionData>() {
   }
 
   // ---- 状態の移り変わり（自身を書き換える。保存は saveChanges） ----
+
+  /** 取り消す。精算も課金もしない。取り消せるかは isCancelable で確かめてから。 */
+  cancel(now: number): void {
+    if (!this.isCancelable(now)) throw new Error('取り消せる期限を過ぎているので、取り消せません');
+    this.change({ status: 'canceled', checkAt: null, updatedAt: now });
+  }
 
   /** 精算に取りかかる（ロックを取る）。取れるかは isClaimable で確かめてから。 */
   claim(now: number): void {
@@ -248,7 +254,9 @@ export class Session extends recordClass<SessionData>() {
   // ---- 表示用 ----
 
   displayStatus(now: number): DisplayStatus {
-    return this.status === 'active' && now >= this.due ? 'settling' : this.status;
+    if (this.status !== 'active') return this.status;
+    if (now >= this.due) return 'settling';
+    return now < this.startAt ? 'waiting' : 'active';
   }
 
   /** 作業時間に対する進み具合（0〜1）。 */

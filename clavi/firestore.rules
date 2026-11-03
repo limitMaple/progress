@@ -13,14 +13,14 @@ service cloud.firestore {
 
       match /sessions/{id} {
         allow read: if isOwner(uid);
-        // 精算の済んだセッションだけ、画面から一覧を消せる
-        // （active と error は精算待ちなので、消して課金から逃げられないようにする）
-        allow delete: if isOwner(uid) && resource.data.status in ['done', 'charged'];
+        // 精算の済んだセッションと取り消したセッションだけ、画面から一覧を消せる
+        // （active と error は精算待ちなので、消して課金から逃げられないようにする。取り消しは Functions から）
+        allow delete: if isOwner(uid) && resource.data.status in ['done', 'charged', 'canceled'];
       }
 
       match /schedules/{id} {
         allow read: if isOwner(uid);
-        // スケジュールはいつでも消せる（作ったあとのセッションは残る。休むのは Functions から）
+        // スケジュールはいつでも消せる（作ったあとのセッションは残る）
         allow delete: if isOwner(uid);
       }
     }

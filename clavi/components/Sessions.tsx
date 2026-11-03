@@ -81,8 +81,6 @@ export default function Sessions() {
                                 uid={uid}
                                 schedule={schedule}
                                 now={now}
-                                busy={busy}
-                                setBusy={setBusy}
                                 setMessage={setMessage}
                             />
                         ))}

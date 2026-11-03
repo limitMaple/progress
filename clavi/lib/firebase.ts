@@ -3,8 +3,8 @@ import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth"
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import type {
-    CreateScheduleRequest, CreateScheduleResponse, SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest,
-    SettleResult, SkipScheduleRequest, StartSessionRequest, StartSessionResponse, SyncNowResponse,
+    CancelSessionRequest, CreateScheduleRequest, CreateScheduleResponse, SaveSettingsRequest, SaveSettingsResponse,
+    SettleNowRequest, SettleResult, StartSessionRequest, StartSessionResponse, SyncNowResponse,
 } from "@/functions/src/model";
 
 // 設定値はコードに書かず、ビルド時の環境変数から読む。
@@ -54,4 +54,4 @@ export const startSession = callFunction<StartSessionRequest, StartSessionRespon
 export const syncNow = callFunction<void, SyncNowResponse>("syncNow");
 export const settleNow = callFunction<SettleNowRequest, SettleResult>("settleNow");
 export const createSchedule = callFunction<CreateScheduleRequest, CreateScheduleResponse>("createSchedule");
-export const skipSchedule = callFunction<SkipScheduleRequest, void>("skipSchedule");
+export const cancelSession = callFunction<CancelSessionRequest, void>("cancelSession");

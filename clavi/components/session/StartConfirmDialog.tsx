@@ -36,6 +36,7 @@ export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
 
     const now = Date.now();
     const day = formatDay(draft.due, now);
+    const cancelableUntil = draft.cancelMinutes == null ? null : (draft.startAt ?? now) - draft.cancelMinutes * 60 * 1000;
 
     return (
         // Esc で閉じたときも「戻って直す」と同じ扱いにする
@@ -63,10 +64,17 @@ export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
                 <dd>{targetLabel(draft)}</dd>
                 <dt>金額</dt>
                 <dd>${draft.dollars}</dd>
+                <dt>取り消し</dt>
+                <dd>
+                    {cancelableUntil == null
+                        ? "できません"
+                        : `${formatDate(cancelableUntil)} ${formatClock(cancelableUntil)} まで`}
+                </dd>
             </dl>
 
             <p className="confirm-warning">
-                開始したあとは変更できません。締切までに届かなければ、Beeminder で ${draft.dollars} が課金されます。
+                開始したあとは変更できません{cancelableUntil == null ? "" : "（取り消しは期限までだけ）"}。
+                締切までに届かなければ、Beeminder で ${draft.dollars} が課金されます。
             </p>
 
             <div className="confirm-buttons">

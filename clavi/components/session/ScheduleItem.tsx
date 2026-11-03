@@ -1,42 +1,29 @@
 "use client";
 
 import { deleteDoc, doc } from "firebase/firestore";
-import { db, skipSchedule } from "@/lib/firebase";
-import { formatDay, formatDuration, sessionTitle } from "@/functions/src/progress";
-import { dateLabel, timeRangeLabel, upcoming, weekdaysLabel } from "@/functions/src/schedule";
-import type { ScheduleData } from "@/functions/src/model";
+import { db } from "@/lib/firebase";
+import { formatDay, formatDeadline, formatDuration, sessionTitle } from "@/functions/src/progress";
+import { dateLabel } from "@/functions/src/calendar";
+import type { Schedule } from "@/functions/src/schedule";
 import { targetLabel, type Message } from "@/components/session/common";
 
-// 先の回をいくつ見せるか（休めるのはこの中から）
+// 先の回をいくつ見せるか
 const UPCOMING = 3;
 
-/** スケジュール 1 件と、これからの回。カウント開始前の回は、その回だけ休める。 */
-export default function ScheduleItem({ uid, schedule, now, busy, setBusy, setMessage }: {
+/**
+ * スケジュール 1 件と、これからの回。
+ * 各回のセッションは取り消せる期限の 1 日前に作られ、セッションの一覧から取り消せる。
+ */
+export default function ScheduleItem({ uid, schedule, now, setMessage }: {
     uid: string;
-    schedule: ScheduleData;
+    schedule: Schedule;
     now: number;
-    busy: boolean;
-    setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;
 }) {
-    const occurrences = upcoming(schedule, now, UPCOMING);
-
-    async function skip(date: string, skip: boolean) {
-        if (busy) return;
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
-            await skipSchedule({ id: schedule.id, date, skip });
-            setMessage({ text: `${dateLabel(date)}の回を${skip ? "休みにしました" : "休まないことにしました"}`, kind: "ok" });
-        } catch (err) {
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
-    }
+    const occurrences = schedule.upcoming(now, UPCOMING);
 
     async function remove() {
-        if (!confirm(`スケジュール「${sessionTitle(schedule)}」を消しますか？\nもう始まっているセッションは残ります。`)) return;
+        if (!confirm(`スケジュール「${sessionTitle(schedule)}」を消しますか？\nもう作ったセッションは残ります。`)) return;
         try {
             await deleteDoc(doc(db, "users", uid, "schedules", schedule.id));
         } catch (err) {
@@ -48,33 +35,33 @@ export default function ScheduleItem({ uid, schedule, now, busy, setBusy, setMes
         <li className="session schedule">
             <div className="session-head">
                 <span className="title">{sessionTitle(schedule)}</span>
-                <span className="badge schedule">{weekdaysLabel(schedule.weekdays)}</span>
+                <span className="badge schedule">{schedule.recurrence.label}</span>
             </div>
             <div className="deadline muted">
-                {`${timeRangeLabel(schedule)} ・ $${schedule.dollars} ・ ${targetLabel(schedule)}`}
+                {`${schedule.timeRangeLabel} ・ $${schedule.dollars} ・ ${targetLabel(schedule)}`}
             </div>
             {schedule.message && <div className="auto-check">{schedule.message}</div>}
             <ul className="occurrences">
                 {occurrences.map((o) => {
-                    const skipped = schedule.skipDates.includes(o.date);
                     const day = formatDay(o.startAt, now);
+                    // nextDate より前の回は、もうセッションを作った（か、作らずに過ぎた）
+                    const created = !schedule.nextDate || o.date < schedule.nextDate;
                     return (
-                        <li key={o.date} className={skipped ? "skipped" : ""}>
+                        <li key={o.date}>
                             <span>
                                 {day === "今日" || day === "明日" ? `${day} ` : ""}{dateLabel(o.date)}
-                                <span className="muted">
-                                    {skipped ? " 休み" : ` あと${formatDuration((o.startAt - now) / 1000)}で開始`}
-                                </span>
+                                <span className="muted">{` あと${formatDuration((o.startAt - now) / 1000)}で開始`}</span>
                             </span>
-                            <button type="button" className="link" onClick={() => skip(o.date, !skipped)} disabled={busy}>
-                                {skipped ? "休みをやめる" : "この回を休む"}
-                            </button>
+                            <span className="muted">
+                                {created ? "作成済み" : `${formatDeadline(schedule.createAt(o), now)}に作成`}
+                            </span>
                         </li>
                     );
                 })}
             </ul>
+            {occurrences.length === 0 && <p className="muted">これからの回はありません</p>}
             <div className="session-foot">
-                <span className="updated muted">カウント開始の時刻にセッションが始まります</span>
+                <span className="updated muted">{`${schedule.cancelLabel}（セッションの一覧から）`}</span>
                 <button type="button" className="link" onClick={remove}>スケジュールを消す</button>
             </div>
         </li>
