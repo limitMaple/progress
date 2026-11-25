@@ -9,17 +9,16 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as logger from 'firebase-functions/logger';
 import {
   loadAccount, userRef, secretRef, sessionsRef, allSessions, claimSettlement, schedulesRef, allSchedules, saveChanges,
-  hasUnsettledSession,
+  hasUnsettledSession, canCharge,
 } from './src/store.ts';
 import { syncSessions } from './src/sync.ts';
 import { settleSession, settleManually } from './src/settle.ts';
 import { togglClient, beeminderClient } from './src/api.ts';
-import { Session } from './src/session.ts';
+import { Session, validateSessionTerms } from './src/session.ts';
 import { generateSessions } from './src/generate.ts';
-import { Schedule, windowMinutes } from './src/schedule.ts';
-import { recurrenceFrom } from './src/recurrence.ts';
-import { isTimeZone } from './src/calendar.ts';
-import { isCancelMinutes, MAX_START_PAST_MS } from './src/model.ts';
+import { Schedule } from './src/schedule.ts';
+import { cancelableUntilFor, isCancelMinutes } from './src/cancel.ts';
+import { InvalidInputError } from './src/errors.ts';
 import type {
   CancelSessionRequest, ChargeResolution, CreateScheduleRequest, CreateScheduleResponse, RecurrenceData,
   SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult, Settings, StartSessionRequest,
@@ -36,6 +35,7 @@ const LOOKAHEAD = 60 * 1000;
  * 画面から呼ぶ関数（callable）を作る。Firebase の onCall に 2 つを足したもの:
  *   - ログインしていない呼び出しを断る
  *   - handler が投げた例外を、画面にメッセージを出せる HttpsError に変える
+ *     （入力の誤りは InvalidInputError を投げれば invalid-argument になる）
  * data は画面から来た値そのままなので、handler の中で型と範囲を確かめること。
  */
 function onAuthenticatedCall<Req, Res>(
@@ -47,14 +47,13 @@ function onAuthenticatedCall<Req, Res>(
       return await handler(request.auth.uid, request.data ?? {});
     } catch (err) {
       if (err instanceof HttpsError) throw err;
+      if (err instanceof InvalidInputError) throw new HttpsError('invalid-argument', err.message);
       logger.error(err);
       throw new HttpsError('failed-precondition', (err as Error).message);
     }
   });
 }
 
-const invalid = (message: string) => new HttpsError('invalid-argument', message);
-const MIN = 60 * 1000;
 // 未精算のセッションがある間は変えられない設定（走っている約束の条件を、あとから緩められないようにする）
 const LOCKED_MESSAGE = '進行中か精算待ちのセッションがある間は、APIトークンと取り消し猶予は変えられません';
 // セッションとスケジュールの ID は randomUUID で作る。'/' などを通すと、Firestore の想定外のパスを指せてしまう
@@ -76,10 +75,10 @@ export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSetting
     // null は「変更しない」。同じ値なら変更ではないので、ロック中でも保存できる（プロジェクトとタグの取り直し）
     const cancelMinutes = data.cancelMinutes == null ? null : Math.floor(Number(data.cancelMinutes));
     if (cancelMinutes != null && !isCancelMinutes(cancelMinutes)) {
-      throw invalid('取り消し猶予は、0以上の分で入力してください');
+      throw new InvalidInputError('取り消し猶予は、0以上の分で入力してください');
     }
     const changing = Object.keys(newTokens).length > 0 || (cancelMinutes != null && cancelMinutes !== saved.cancelMinutes);
-    if (changing && await hasUnsettledSession(uid)) throw invalid(LOCKED_MESSAGE);
+    if (changing && await hasUnsettledSession(uid)) throw new InvalidInputError(LOCKED_MESSAGE);
 
     if (Object.keys(newTokens).length) await secretRef(uid).set(newTokens, { merge: true });
     const tokens = { ...savedTokens, ...newTokens };
@@ -128,38 +127,46 @@ export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSetting
   },
 );
 
-// ---- セッションの開始 ----
+// ---- セッションの開始とスケジュールの作成（どちらも「約束」を作る） ----
+
+/** 画面から来た、約束の中身のうちセッションとスケジュールで同じ項目。型だけそろえ、正しいかは各クラスが確かめる。 */
+function readCommitment(data: Partial<StartSessionRequest | CreateScheduleRequest>) {
+  return {
+    projectId: data.projectId == null ? null : Number(data.projectId),
+    tag: String(data.tag ?? '').trim(),
+    requiredSec: Math.floor(Number(data.requiredSec)),
+    dollars: Math.floor(Number(data.dollars)),
+  };
+}
+
+/**
+ * 約束を作れるアカウントか確かめ、設定と、数えるプロジェクトを返す。
+ * 課金できない約束は作らない。プロジェクトは設定に控えた（Toggl で進行中の）ものだけ選べる。
+ */
+async function loadForCommitment(uid: string, projectId: number | null) {
+  const account = await loadAccount(uid);
+  if (!canCharge(account)) throw new InvalidInputError('BeeminderのAPIトークンが未設定です');
+  const { settings } = account;
+  const project = projectId == null ? null : settings.projects.find((p) => p.id === projectId);
+  if (project === undefined) {
+    throw new InvalidInputError('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
+  }
+  return { settings, project };
+}
 
 export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessionResponse>(
   async (uid, data) => {
     const now = Date.now();
-    const tag = String(data.tag ?? '').trim();
-    const projectId = data.projectId == null ? null : Number(data.projectId);
-    const requiredSec = Math.floor(Number(data.requiredSec));
+    const { projectId, tag, requiredSec, dollars } = readCommitment(data);
     // 数え始める時刻を指定しなければ、開始した時刻から数える
-    const startAt = data.startAt == null ? now : Math.floor(Number(data.startAt));
+    const startAt = data.startAt == null ? null : Math.floor(Number(data.startAt));
     const due = Math.floor(Number(data.due));
-    const dollars = Math.floor(Number(data.dollars));
-    if (!(requiredSec > 0)) throw invalid('作業時間を入力してください');
-    if (!(dollars >= 1)) throw invalid('金額は$1以上にしてください');
-    if (!(due > now)) throw invalid('締切が過ぎています');
-    if (!(startAt >= now - MAX_START_PAST_MS)) throw invalid('カウント開始は30日前までにしてください');
-    if (!(due - startAt >= requiredSec * 1000)) throw invalid('カウント開始から締切までが、作業時間より短くなっています');
+    validateSessionTerms({ requiredSec, startAt, due, dollars }, now);
 
-    const { settings, tokens } = await loadAccount(uid);
-    if (!tokens.beeminderToken || !settings.beeminderUser) {
-      throw invalid('BeeminderのAPIトークンが未設定です');
-    }
-    const project = projectId == null ? null : settings.projects.find((p) => p.id === projectId);
-    if (project === undefined) {
-      throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
-    }
-
-    // 取り消せる期限は設定の猶予から決まる。期限がもう過ぎているなら、取り消せないセッションにする
-    const cancelableUntil = startAt - settings.cancelMinutes * MIN;
+    const { settings, project } = await loadForCommitment(uid, projectId);
     const session = Session.start({
-      id: randomUUID(), now, project, tag, requiredSec, startAt, due, dollars,
-      cancelableUntil: cancelableUntil > now ? cancelableUntil : null,
+      id: randomUUID(), now, project, tag, requiredSec, startAt: startAt ?? now, due, dollars,
+      cancelableUntil: cancelableUntilFor(startAt, settings.cancelMinutes, now),
     });
     await sessionsRef(uid).doc(session.id).set(session);
     // 次の入力欄の初期値にする
@@ -168,51 +175,23 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
   },
 );
 
-// ---- スケジュール ----
-
-const isMinuteOfDay = (n: number) => Number.isInteger(n) && n >= 0 && n < 24 * 60;
-
 export const createSchedule = onAuthenticatedCall<CreateScheduleRequest, CreateScheduleResponse>(
   async (uid, data) => {
-    const now = Date.now();
-    const tag = String(data.tag ?? '').trim();
-    const projectId = data.projectId == null ? null : Number(data.projectId);
-    const requiredSec = Math.floor(Number(data.requiredSec));
-    const dollars = Math.floor(Number(data.dollars));
-    const startMinutes = Number(data.startMinutes);
-    const dueMinutes = Number(data.dueMinutes);
-    const timeZone = String(data.timeZone ?? '');
-    let repeat: RecurrenceData;
-    try {
-      // 画面から来た値を確かめ、要る項目だけにする
-      repeat = recurrenceFrom(data.repeat as RecurrenceData).toData();
-    } catch (err) {
-      throw invalid((err as Error).message);
-    }
-    if (!isMinuteOfDay(startMinutes) || !isMinuteOfDay(dueMinutes)) throw invalid('カウント開始と締切の時刻を入力してください');
-    if (!isTimeZone(timeZone)) throw invalid('タイムゾーンが正しくありません');
-    if (!(requiredSec > 0)) throw invalid('作業時間を入力してください');
-    if (!(dollars >= 1)) throw invalid('金額は$1以上にしてください');
-    if (windowMinutes({ startMinutes, dueMinutes }) * 60 < requiredSec) {
-      throw invalid('カウント開始から締切までが、作業時間より短くなっています');
-    }
-
-    const { settings, tokens } = await loadAccount(uid);
-    if (!tokens.beeminderToken || !settings.beeminderUser) {
-      throw invalid('BeeminderのAPIトークンが未設定です');
-    }
-    const project = projectId == null ? null : settings.projects.find((p) => p.id === projectId);
-    if (project === undefined) {
-      throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
-    }
-    // 取り消し猶予は設定のものを使う（スケジュールごとには決めない）。控えるので、あとで設定が変わっても影響しない
-    const { cancelMinutes } = settings;
-    if (!isCancelMinutes(cancelMinutes)) throw invalid('設定の取り消し猶予が正しくありません。設定を保存し直してください');
-
+    const { projectId, ...commitment } = readCommitment(data);
+    const { settings, project } = await loadForCommitment(uid, projectId);
+    // 中身は Schedule.create が確かめる。取り消し猶予は設定のものを控える（スケジュールごとには決めない。
+    // 控えるので、あとで設定が変わっても影響しない）
     const schedule = Schedule.create({
-      id: randomUUID(), now, project, tag, requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone,
+      id: randomUUID(),
+      now: Date.now(),
+      project,
+      ...commitment,
+      repeat: data.repeat as RecurrenceData,
+      startMinutes: Number(data.startMinutes),
+      dueMinutes: Number(data.dueMinutes),
+      cancelMinutes: settings.cancelMinutes,
+      timeZone: String(data.timeZone ?? ''),
     });
-    if (!schedule.nextDate) throw invalid('この繰り返しでは、回が1つもありません');
     await schedulesRef(uid).doc(schedule.id).set(schedule);
     return { id: schedule.id };
   },
@@ -222,10 +201,10 @@ export const createSchedule = onAuthenticatedCall<CreateScheduleRequest, CreateS
 
 export const cancelSession = onAuthenticatedCall<CancelSessionRequest, void>(async (uid, data) => {
   const id = String(data.id ?? '');
-  if (!ID.test(id)) throw invalid('セッションの指定が正しくありません');
+  if (!ID.test(id)) throw new InvalidInputError('セッションの指定が正しくありません');
   const ref = sessionsRef(uid).doc(id);
   const session = (await ref.get()).data();
-  if (!session) throw invalid('セッションが見つかりません');
+  if (!session) throw new InvalidInputError('セッションが見つかりません');
   session.cancel(Date.now());
   // 読んだあとに精算などが書き換えていたら、ConflictError で止まる
   await saveChanges(ref, session);
@@ -246,9 +225,9 @@ const RESOLUTIONS: readonly ChargeResolution[] = ['charged', 'not_charged'];
  */
 export const settleNow = onAuthenticatedCall<SettleNowRequest, SettleResult>(async (uid, data) => {
   const id = String(data.id ?? '');
-  if (!ID.test(id)) throw invalid('セッションの指定が正しくありません');
+  if (!ID.test(id)) throw new InvalidInputError('セッションの指定が正しくありません');
   const resolve = RESOLUTIONS.find((r) => r === data.resolve);
-  if (data.resolve != null && !resolve) throw invalid('resolve の値が正しくありません');
+  if (data.resolve != null && !resolve) throw new InvalidInputError('resolve の値が正しくありません');
   return settleManually(uid, id, resolve);
 });
 

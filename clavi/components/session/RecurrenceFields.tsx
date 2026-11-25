@@ -2,6 +2,7 @@
 
 import type { ChangeEvent, ReactNode } from "react";
 import { WEEKDAYS } from "@/functions/src/calendar";
+import { MAX_INTERVAL } from "@/functions/src/recurrence";
 import type { RecurrenceData } from "@/functions/src/model";
 
 // 繰り返しのきまりの入力欄。きまりの種類ごとの入力欄を RecurrenceEditor として持ち、
@@ -126,7 +127,7 @@ export default function RecurrenceFields({ value, onChange }: FieldsProps<Recurr
                 <span>繰り返し</span>
                 <span className="row">
                     <input
-                        type="number" min="1" max="12" className="num"
+                        type="number" min="1" max={MAX_INTERVAL} className="num"
                         value={fromNumber(value.interval)}
                         onChange={(e) => onChange({ ...value, interval: toNumber(e.target.value) })}
                     />

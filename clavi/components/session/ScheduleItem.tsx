@@ -14,15 +14,20 @@ const UPCOMING = 3;
  * スケジュール 1 件と、これからの回。
  * 各回のセッションは取り消せる期限の 1 日前に作られ、「セッション」タブから取り消せる。
  */
-export default function ScheduleItem({ uid, item: schedule, now, setMessage }: ItemProps<Schedule>) {
+export default function ScheduleItem({ uid, item: schedule, now, busy, setBusy, setMessage }: ItemProps<Schedule>) {
     const occurrences = schedule.upcoming(now, UPCOMING);
 
     async function remove() {
+        if (busy) return;
         if (!confirm(`スケジュール「${sessionTitle(schedule)}」を消しますか？\nもう作ったセッションは残ります。`)) return;
+        setBusy(true);
+        setMessage({ text: "", kind: "" });
         try {
             await deleteDoc(doc(db, "users", uid, "schedules", schedule.id));
         } catch (err) {
             setMessage({ text: (err as Error).message, kind: "error" });
+        } finally {
+            setBusy(false);
         }
     }
 
@@ -39,8 +44,6 @@ export default function ScheduleItem({ uid, item: schedule, now, setMessage }: I
             <ul className="occurrences">
                 {occurrences.map((o) => {
                     const day = formatDay(o.startAt, now);
-                    // nextDate より前の回は、もうセッションを作った（か、作らずに過ぎた）
-                    const created = !schedule.nextDate || o.date < schedule.nextDate;
                     return (
                         <li key={o.date}>
                             <span>
@@ -48,7 +51,7 @@ export default function ScheduleItem({ uid, item: schedule, now, setMessage }: I
                                 <span className="muted">{` あと${formatDuration((o.startAt - now) / 1000)}で開始`}</span>
                             </span>
                             <span className="muted">
-                                {created ? "作成済み" : `${formatDeadline(schedule.createAt(o), now)}に作成`}
+                                {schedule.isCreated(o) ? "作成済み" : `${formatDeadline(schedule.creationTime(o), now)}に作成`}
                             </span>
                         </li>
                     );
@@ -57,7 +60,7 @@ export default function ScheduleItem({ uid, item: schedule, now, setMessage }: I
             {occurrences.length === 0 && <p className="muted">これからの回はありません</p>}
             <div className="session-foot">
                 <span className="updated muted">{`${schedule.cancelLabel}（「セッション」タブから）`}</span>
-                <button type="button" className="link" onClick={remove}>スケジュールを消す</button>
+                <button type="button" className="link" onClick={remove} disabled={busy}>スケジュールを消す</button>
             </div>
         </li>
     );

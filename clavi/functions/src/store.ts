@@ -121,7 +121,17 @@ export async function hasUnsettledSession(uid: string): Promise<boolean> {
   return !snap.empty;
 }
 
-export async function loadAccount(uid: string): Promise<{ settings: Settings; tokens: Tokens }> {
+export interface Account {
+  settings: Settings;
+  tokens: Tokens;
+}
+
+/** Beeminder で課金できるか。課金できないなら、セッションを始めない（課金できない約束は作らない）。 */
+export function canCharge({ settings, tokens }: Account): boolean {
+  return Boolean(tokens.beeminderToken && settings.beeminderUser);
+}
+
+export async function loadAccount(uid: string): Promise<Account> {
   const [user, secret] = await Promise.all([userRef(uid).get(), secretRef(uid).get()]);
   return {
     settings: { ...DEFAULT_SETTINGS, ...user.data() },

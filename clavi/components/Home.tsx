@@ -101,6 +101,7 @@ function Panel({ tab, panel }: { tab: Tab<Listed>; panel: PanelProps }) {
                 projects={settings.projects}
                 tags={settings.tags}
                 cancelMinutes={settings.cancelMinutes}
+                now={now}
                 disabled={disabled}
                 setBusy={setBusy}
                 setMessage={setMessage}

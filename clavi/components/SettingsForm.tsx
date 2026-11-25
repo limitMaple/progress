@@ -3,8 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { auth, saveSettings } from "@/lib/firebase";
 import { useSessions, useSettings } from "@/lib/account";
-import { cancelLabel } from "@/functions/src/schedule";
-import { isCancelMinutes, MAX_CANCEL_MINUTES } from "@/functions/src/model";
+import { cancelLabel, isCancelMinutes, MAX_CANCEL_MINUTES } from "@/functions/src/cancel";
 import type { SaveSettingsResponse, Settings } from "@/functions/src/model";
 
 /**

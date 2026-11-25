@@ -7,6 +7,8 @@
 
 import { formatDuration, sessionTitle, trackedSeconds } from './progress.ts';
 import { recordClass } from './record.ts';
+import { InvalidInputError } from './errors.ts';
+import { MAX_START_PAST_MS, UNSETTLED_STATUSES } from './model.ts';
 import type {
   ChargeRecord, SessionData, SessionStatus, TimeEntry, TogglProject,
 } from './model.ts';
@@ -21,6 +23,30 @@ const MAX_ATTEMPTS = 3;
 
 /** 表示用の状態。waiting は「カウント開始前の active」、settling は「締切を過ぎた active」（精算を待っている）。 */
 export type DisplayStatus = SessionStatus | 'waiting' | 'settling';
+
+/** 手で始めるセッションの、約束の中身。 */
+export interface SessionTerms {
+  requiredSec: number;
+  /** 数え始める時刻。null なら始めた時刻から */
+  startAt: number | null;
+  due: number;
+  dollars: number;
+}
+
+/**
+ * 手で始めるセッションの中身が正しいかを確かめ、正しくなければ InvalidInputError を投げる。
+ * Functions（startSession）と入力欄が同じものを使い、確かめ方と文をそろえる。
+ */
+export function validateSessionTerms({ requiredSec, startAt, due, dollars }: SessionTerms, now: number): void {
+  const countFrom = startAt ?? now;
+  if (!(due > now)) throw new InvalidInputError('締切が過ぎています');
+  if (!(countFrom >= now - MAX_START_PAST_MS)) throw new InvalidInputError('カウント開始は30日前までにしてください');
+  if (!(requiredSec > 0)) throw new InvalidInputError('作業時間を入力してください');
+  if (!(dollars >= 1)) throw new InvalidInputError('金額は$1以上にしてください');
+  if (!(due - countFrom >= requiredSec * 1000)) {
+    throw new InvalidInputError(`カウント開始から締切まで${formatDuration((due - countFrom) / 1000)}しかありません`);
+  }
+}
 
 export class Session extends recordClass<SessionData>() {
   // # の項目は列挙されないので、Firestore に保存する項目（{ ...session }）には入らない
@@ -98,7 +124,7 @@ export class Session extends recordClass<SessionData>() {
 
   /** 精算が済んでいる（達成か課金済み）か、取り消した。一覧から消せるのはこれだけ。 */
   get isSettled(): boolean {
-    return this.status === 'done' || this.status === 'charged' || this.status === 'canceled';
+    return !UNSETTLED_STATUSES.includes(this.status);
   }
 
   /** 取り消せるか。進行中で、取り消せる期限より前だけ。 */
@@ -117,7 +143,7 @@ export class Session extends recordClass<SessionData>() {
    */
   isClaimable(now: number, { resolving = false } = {}): boolean {
     if (this.charge) return false;
-    if (this.status !== 'active' && this.status !== 'error') return false;
+    if (this.isSettled) return false;
     if (this.chargeRequestedAt && !resolving) return false;
     return !(this.claimedAt && now - this.claimedAt < CLAIM_TTL);
   }

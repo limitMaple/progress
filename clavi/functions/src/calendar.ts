@@ -41,6 +41,22 @@ export function dateLabel(date: string): string {
   return `${d.month}/${d.day}（${WEEKDAYS[weekdayOf(d)]}）`;
 }
 
+/** その日の 0:00 からの分として正しいか（0:00〜23:59）。 */
+export const isMinuteOfDay = (n: number) => Number.isInteger(n) && n >= 0 && n < 24 * 60;
+
+/** "HH:MM" をその日の 0:00 からの分にする。形が正しくなければ null。 */
+export function parseClock(value: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [h, m] = [Number(match[1]), Number(match[2])];
+  return h < 24 && m < 60 ? h * 60 + m : null;
+}
+
+/** その日の 0:00 からの分を「9:05」の形にする。 */
+export function minuteOfDayLabel(minutes: number): string {
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
 /** 時刻 ms の、timeZone での日付 "YYYY-MM-DD"。 */
 export function zonedDate(ms: number, timeZone: string): string {
   return Temporal.Instant.fromEpochMilliseconds(ms).toZonedDateTimeISO(timeZone).toPlainDate().toString();

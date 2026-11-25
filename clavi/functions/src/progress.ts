@@ -1,5 +1,6 @@
 // 進捗計算と表示用の純粋関数。Web アプリからも import するので、Node に依存しないこと。
 
+import { WEEKDAYS } from './calendar.ts';
 import type { TimeEntry } from './model.ts';
 
 /**
@@ -69,10 +70,21 @@ export function formatDay(ms: number, now: number): string {
 
 /** 時刻を「23:30」「明日 1:00」「9/18 8:00」の形にする（今日なら日付を省く）。 */
 export function formatDeadline(ms: number, now: number): string {
-  const d = new Date(ms);
-  const clock = `${d.getHours()}:${pad(d.getMinutes())}`;
+  const clock = formatClock(ms);
   const day = formatDay(ms, now);
   return day === '今日' ? clock : `${day} ${clock}`;
+}
+
+/** 時刻の日付を「9/30（火）」の形にする。 */
+export function formatDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
+}
+
+/** 時刻を「9:05」の形にする。 */
+export function formatClock(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getHours()}:${pad(d.getMinutes())}`;
 }
 
 function startOfDay(ms: number): number {

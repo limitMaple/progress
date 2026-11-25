@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+    collection, doc, onSnapshot, orderBy, query, type DocumentData, type QueryConstraint,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { DEFAULT_SETTINGS, type ScheduleData, type SessionData, type Settings } from "@/functions/src/model";
 import { Session } from "@/functions/src/session";
@@ -24,22 +26,28 @@ export function useSettings(uid: string) {
     return settings;
 }
 
+/** users/{uid} の下のコレクションを、並べて読み続ける。読み込み中と空は同じ []。 */
+function useCollection<T>(uid: string, name: string, order: QueryConstraint, toItem: (data: DocumentData) => T): T[] {
+    const [items, setItems] = useState<T[]>([]);
+    useEffect(() => onSnapshot(
+        query(collection(db, "users", uid, name), order),
+        (snap) => setItems(snap.docs.map((d) => toItem(d.data()))),
+    ), [uid, name, order, toItem]);
+    return items;
+}
+
+// useCollection の依存に入るので、描くたびに作り直さないよう外に置く
+const NEWEST_FIRST = orderBy("createdAt", "desc");
+const OLDEST_FIRST = orderBy("createdAt");
+const toSession = (data: DocumentData) => new Session(data as SessionData);
+const toSchedule = (data: DocumentData) => new Schedule(data as ScheduleData);
+
 /** セッション一覧（新しい順）。自動精算の結果もそのまま反映される。 */
 export function useSessions(uid: string) {
-    const [sessions, setSessions] = useState<Session[]>([]);
-    useEffect(() => onSnapshot(
-        query(collection(db, "users", uid, "sessions"), orderBy("createdAt", "desc")),
-        (snap) => setSessions(snap.docs.map((d) => new Session(d.data() as SessionData))),
-    ), [uid]);
-    return sessions;
+    return useCollection(uid, "sessions", NEWEST_FIRST, toSession);
 }
 
 /** スケジュール一覧（古い順）。次の回の変化もそのまま反映される。 */
 export function useSchedules(uid: string) {
-    const [schedules, setSchedules] = useState<Schedule[]>([]);
-    useEffect(() => onSnapshot(
-        query(collection(db, "users", uid, "schedules"), orderBy("createdAt")),
-        (snap) => setSchedules(snap.docs.map((d) => new Schedule(d.data() as ScheduleData))),
-    ), [uid]);
-    return schedules;
+    return useCollection(uid, "schedules", OLDEST_FIRST, toSchedule);
 }

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CREATE_AHEAD, Schedule, windowMinutes } from '../src/schedule.ts';
+import { InvalidInputError } from '../src/errors.ts';
 import { dateLabel, isDate, isTimeZone, zonedDate, zonedTime } from '../src/calendar.ts';
 import type { ScheduleData } from '../src/model.ts';
 
@@ -30,8 +31,8 @@ const make = (data: Partial<ScheduleData> = {}) => new Schedule({
 });
 
 /** make() と同じ中身で、Schedule.create したもの。 */
-const create = (now: number) => {
-  const { id, tag, requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone } = make();
+const create = (now: number, data: Partial<ScheduleData> = {}) => {
+  const { id, tag, requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone } = make(data);
   return Schedule.create({
     id, now, project: null, tag, requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone,
   });
@@ -103,31 +104,31 @@ test('create: 最初の回は、作った時点でまだ取り消せるもの', 
   assert.equal(create(jst('2026-10-30T08:30:00')).nextDate, '2026-11-02');
 });
 
-test('planCreates: 作る時刻（取り消せる期限の 24 時間前）を迎えた回だけを作り、次の回へ進める', () => {
+test('readyOccurrences: 作る時刻（取り消せる期限の 24 時間前）を迎えた回だけを作り、次の回へ進める', () => {
   const s = make({ nextDate: '2026-10-30' });
-  assert.deepEqual(s.planCreates(jst('2026-10-29T07:59:00')).create, []);
+  assert.deepEqual(s.readyOccurrences(jst('2026-10-29T07:59:00')).ready, []);
 
-  const plan = s.planCreates(jst('2026-10-29T08:00:00'));
-  assert.deepEqual(plan.create.map((o) => o.date), ['2026-10-30']);
+  const plan = s.readyOccurrences(jst('2026-10-29T08:00:00'));
+  assert.deepEqual(plan.ready.map((o) => o.date), ['2026-10-30']);
   // 月曜の回は、日曜の 8:00 に作る
   assert.equal(plan.next?.date, '2026-11-02');
-  assert.equal(s.createAt(plan.next!), jst('2026-11-01T08:00:00'));
+  assert.equal(s.creationTime(plan.next!), jst('2026-11-01T08:00:00'));
 });
 
-test('planCreates: 止まっていた間の回は、締切前のものだけ作る', () => {
-  const plan = make({ nextDate: '2026-10-29' }).planCreates(jst('2026-10-30T10:00:00'));
+test('readyOccurrences: 止まっていた間の回は、締切前のものだけ作る', () => {
+  const plan = make({ nextDate: '2026-10-29' }).readyOccurrences(jst('2026-10-30T10:00:00'));
   // 木曜の回は締切を過ぎているので作らない
-  assert.deepEqual(plan.create.map((o) => o.date), ['2026-10-30']);
+  assert.deepEqual(plan.ready.map((o) => o.date), ['2026-10-30']);
   assert.equal(plan.next?.date, '2026-11-02');
 });
 
-test('planCreates: 回がもう無ければ、次の回は null', () => {
+test('readyOccurrences: 回がもう無ければ、次の回は null', () => {
   const s = make({
     repeat: { kind: 'monthlyByDay', from: '2027-02-01', interval: 12, day: 30 },
     nextDate: '2027-02-01',
   });
-  assert.deepEqual(s.planCreates(jst('2027-02-28T10:00:00')), { create: [], next: null });
-  assert.deepEqual(s.positionAt(null), { nextDate: null, nextCreateAt: null });
+  assert.deepEqual(s.readyOccurrences(jst('2027-02-28T10:00:00')), { ready: [], next: null });
+  assert.deepEqual(s.nextFieldsFor(null), { nextDate: null, nextCreateAt: null });
 });
 
 test('sessionFor: ID は回ごとに決まり、取り消せる期限を持つ', () => {
@@ -146,4 +147,33 @@ test('保存する項目に、作った Recurrence は入らない', () => {
   assert.equal(s.recurrence.label, '平日');
   assert.deepEqual(Object.keys({ ...s }).sort(), Object.keys(make()).sort());
   assert.equal(Object.keys({ ...s }).includes('recurrence'), false);
+});
+
+test('create: 中身が正しくなければ、画面に出せる文の InvalidInputError を投げる', () => {
+  const now = jst('2026-10-30T07:00:00');
+  const fails = (data: Partial<ScheduleData>, message: RegExp) =>
+    assert.throws(() => create(now, data), (err) => err instanceof InvalidInputError && message.test(err.message));
+  fails({ repeat: { kind: 'weekly', from: '2026-10-01', interval: 1, weekdays: [] } }, /曜日を選んで/);
+  fails({ repeat: { kind: 'yearly' } as never }, /繰り返しの種類/);
+  fails({ startMinutes: NaN }, /カウント開始の時刻/);
+  fails({ dueMinutes: 24 * 60 }, /締切の時刻/);
+  fails({ timeZone: 'Mars/Base' }, /タイムゾーン/);
+  fails({ requiredSec: 0 }, /作業時間/);
+  fails({ dollars: 0 }, /\$1以上/);
+  fails({ cancelMinutes: -1 }, /取り消し猶予/);
+  fails({ requiredSec: 10 * 3600 }, /締切まで9時間00分しかありません/);
+  // 2027-02 だけから始まる「12か月ごとの30日」は、回が無い
+  fails({ repeat: { kind: 'monthlyByDay', from: '2027-02-01', interval: 12, day: 30 } }, /回が1つもありません/);
+});
+
+test('create: repeat は種類に要る項目だけにして保存する', () => {
+  const repeat = { kind: 'daily', from: '2026-10-01', interval: 1, weekdays: [1], extra: 'x' } as never;
+  assert.deepEqual(create(jst('2026-10-30T07:00:00'), { repeat }).repeat, { kind: 'daily', from: '2026-10-01', interval: 1 });
+});
+
+test('isCreated: nextDate より前の回は済んでいる', () => {
+  const s = make({ nextDate: '2026-11-02' });
+  assert.equal(s.isCreated(s.occurrenceAt('2026-10-30')), true);
+  assert.equal(s.isCreated(s.occurrenceAt('2026-11-02')), false);
+  assert.equal(make({ nextDate: null }).isCreated(s.occurrenceAt('2026-11-02')), true);
 });

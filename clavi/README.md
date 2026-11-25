@@ -71,6 +71,9 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
   - `src/session.ts` … セッション（`Session` クラス）。状態の移り変わりと表示用の計算。画面側も使う
   - `src/recurrence.ts` … 繰り返しのきまり。`Recurrence` インターフェースと、日・週・月ごとの実装クラス。画面側も使う
   - `src/schedule.ts` … スケジュール（`Schedule` クラス）。各回の時刻・締切・取り消せる期限と、いつセッションを作るか。画面側も使う
+  - `src/cancel.ts` … 取り消し猶予の決まり（取り消せる期限の計算・使える値・表示の文）。画面側も使う
+  - `src/errors.ts` … 入力の誤り（`InvalidInputError`）。`Schedule.create` と `validateSessionTerms` が投げ、
+    Functions は invalid-argument に、画面は入力欄の下の文にする（確かめ方を画面と Functions で 2 回書かない）
   - `src/calendar.ts` … 日付とタイムゾーンの計算（中身は Temporal のポリフィル `temporal-polyfill`）
   - `src/generate.ts` … スケジュールから、作る時刻を迎えた回のセッションを作る（トランザクション）
   - `src/store.ts` … Firestore の読み書きと、二重課金を防ぐロック

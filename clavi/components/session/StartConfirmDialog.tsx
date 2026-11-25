@@ -1,23 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { sessionTitle, formatDuration, formatDay } from "@/functions/src/progress";
+import { sessionTitle, formatClock, formatDate, formatDuration, formatDay } from "@/functions/src/progress";
 import { targetLabel } from "@/components/session/common";
 import type { Draft } from "@/components/session/NewSessionForm";
-
-const WEEKDAYS = "日月火水木金土";
-
-/** 「9/30（火）」の形。 */
-function formatDate(ms: number): string {
-    const d = new Date(ms);
-    return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
-}
-
-/** 「9:05」の形。 */
-function formatClock(ms: number): string {
-    const d = new Date(ms);
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
 
 /**
  * 開始前の確認画面。開始したあとは内容を変えられないので、締切とカウント開始を
@@ -36,7 +22,7 @@ export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
 
     const now = Date.now();
     const day = formatDay(draft.due, now);
-    const cancelableUntil = draft.cancelMinutes == null ? null : (draft.startAt ?? now) - draft.cancelMinutes * 60 * 1000;
+    const { cancelableUntil } = draft;
 
     return (
         // Esc で閉じたときも「戻って直す」と同じ扱いにする

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Settings, TogglProject } from "@/functions/src/model";
 import type { Session } from "@/functions/src/session";
 import type { Schedule } from "@/functions/src/schedule";
+import { InvalidInputError } from "@/functions/src/errors";
 
 export type Message = { text: string; kind: "" | "ok" | "error" };
 
@@ -15,6 +16,19 @@ export function useNow() {
     return now;
 }
 
+/**
+ * fn を呼ぶ。入力の誤り（InvalidInputError）を投げたら、その文を error にして返す。
+ * 確かめ方は functions/src の各クラスと同じものを使い、入力欄で別に書かない。ほかの例外はそのまま投げる。
+ */
+export function checkInput<T>(fn: () => T): { value: T; error: "" } | { value: null; error: string } {
+    try {
+        return { value: fn(), error: "" };
+    } catch (err) {
+        if (err instanceof InvalidInputError) return { value: null, error: err.message };
+        throw err;
+    }
+}
+
 /** 何の記録を数えるか。「プロジェクト「資格」・タグ「過去問」」「すべての記録」の形。 */
 export function targetLabel({ projectName, tag }: { projectName?: string; tag: string }): string {
     const parts = [
@@ -24,7 +38,7 @@ export function targetLabel({ projectName, tag }: { projectName?: string; tag: s
     return parts.length ? parts.join("・") : "すべての記録";
 }
 
-/** 一覧の 1 件の部品が受け取るもの。使わないものは受け取らなくてよい（ScheduleItem は busy を見ない）。 */
+/** 一覧の 1 件の部品が受け取るもの。使わないものは受け取らなくてよい。 */
 export type ItemProps<T> = {
     uid: string;
     item: T;
@@ -41,8 +55,10 @@ export type FormProps = {
     /** 選択肢。設定が変われば追従する */
     projects: TogglProject[];
     tags: string[];
-    /** 設定の取り消し猶予（分）。スケジュールの各回をいつまで取り消せるか */
+    /** 設定の取り消し猶予（分）。セッションやスケジュールの各回をいつまで取り消せるか */
     cancelMinutes: number;
+    /** 表示に使う今の時刻（30 秒ごとに進む）。送るときは Date.now() で確かめ直す */
+    now: number;
     disabled: boolean;
     setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;

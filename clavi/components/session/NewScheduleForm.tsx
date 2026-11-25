@@ -3,12 +3,12 @@
 import { type FormEvent } from "react";
 import Link from "next/link";
 import { createSchedule } from "@/lib/firebase";
-import { formatDuration, sessionTitle } from "@/functions/src/progress";
-import { dateLabel } from "@/functions/src/calendar";
-import { recurrenceFrom } from "@/functions/src/recurrence";
-import { cancelLabel, parseClock, Schedule, windowMinutes } from "@/functions/src/schedule";
-import type { RecurrenceData } from "@/functions/src/model";
-import { targetLabel, type FormProps } from "@/components/session/common";
+import { sessionTitle } from "@/functions/src/progress";
+import { dateLabel, parseClock, zonedDate } from "@/functions/src/calendar";
+import { cancelLabel } from "@/functions/src/cancel";
+import { Schedule } from "@/functions/src/schedule";
+import type { CreateScheduleRequest, RecurrenceData } from "@/functions/src/model";
+import { checkInput, targetLabel, type FormProps } from "@/components/session/common";
 import RecurrenceFields, { RECURRENCE_EDITORS } from "@/components/session/RecurrenceFields";
 import {
     DollarsField, DurationField, ProjectField, SubmitRow, TagField,
@@ -30,18 +30,14 @@ type FormValues = {
     dollars: string;
 };
 
-/** 時刻 ms の、この画面のタイムゾーンでの日付 "YYYY-MM-DD"。 */
-function localDate(ms: number): string {
-    const d = new Date(ms);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+/** この画面のタイムゾーン。スケジュールの時刻はこれで読む。 */
+const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 function initialValues(requiredSec: number): FormValues {
     return {
         projectId: "",
         tag: "",
-        repeat: RECURRENCE_EDITORS.weekly.initial({ from: localDate(Date.now()), interval: 1 }),
+        repeat: RECURRENCE_EDITORS.weekly.initial({ from: zonedDate(Date.now(), browserTimeZone()), interval: 1 }),
         startTime: "",
         deadlineTime: "",
         ...durationValues(requiredSec),
@@ -54,60 +50,37 @@ function initialValues(requiredSec: number): FormValues {
  * 取り消し猶予はここでは決めず、設定の値（cancelMinutes）に従う。
  */
 export default function NewScheduleForm(
-    { initialRequiredSec, projects, tags, cancelMinutes, disabled, setBusy, setMessage }: FormProps,
+    { initialRequiredSec, projects, tags, cancelMinutes, now, disabled, setBusy, setMessage }: FormProps,
 ) {
     const { values, setValues, change } = useFormValues(() => initialValues(initialRequiredSec));
 
-    const form = readForm();
+    const form = readForm(now);
 
-    function readForm() {
-        const now = Date.now();
+    /** 送る値と、それで作られるスケジュール（作ったらどうなるかを見せる）。正しくなければ error。 */
+    function readForm(now: number) {
         const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
-        const requiredSec = requiredSecOf(values);
-        const dollars = dollarsOf(values);
-        const startMinutes = parseClock(values.startTime);
-        const dueMinutes = parseClock(values.deadlineTime);
-        const { repeat } = values;
-
-        function validate(): string {
-            try {
-                // 曜日や日付の確かめ方は、繰り返しの各クラスに任せる
-                recurrenceFrom(repeat);
-            } catch (err) {
-                return (err as Error).message;
-            }
-            if (startMinutes == null) return "カウント開始の時刻を入力してください";
-            if (dueMinutes == null) return "締切の時刻を入力してください";
-            if (requiredSec <= 0) return "作業時間を入力してください";
-            if (dollars < 1) return "金額は$1以上にしてください";
-            const window = windowMinutes({ startMinutes, dueMinutes }) * 60;
-            if (window < requiredSec) return `カウント開始から締切まで${formatDuration(window)}しかありません`;
-            return "";
-        }
-        const error = validate();
-        if (error) return { error, request: null, schedule: null };
-
         const fields = {
             tag: values.tag.trim(),
-            requiredSec,
-            dollars,
-            repeat,
-            startMinutes: startMinutes!,
-            dueMinutes: dueMinutes!,
-            // 時刻はこの画面のタイムゾーンで読む
-            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            requiredSec: requiredSecOf(values),
+            dollars: dollarsOf(values),
+            repeat: values.repeat,
+            // 空欄は NaN にして、Schedule.create に「入力してください」と言わせる
+            startMinutes: parseClock(values.startTime) ?? NaN,
+            dueMinutes: parseClock(values.deadlineTime) ?? NaN,
+            timeZone: browserTimeZone(),
         };
-        const request = { projectId: project?.id ?? null, ...fields };
-        // 作ったらどうなるかを見せるため、保存はせずに Functions と同じ計算をする（取り消し猶予は Functions も設定から取る）
-        const schedule = Schedule.create({ id: "preview", now, project, ...fields, cancelMinutes });
-        if (!schedule.nextDate) return { error: "この繰り返しでは、回が1つもありません", request: null, schedule: null };
-        return { error: "", request, schedule };
+        const request: CreateScheduleRequest = { projectId: project?.id ?? null, ...fields };
+        // 保存はせずに Functions と同じ計算をする（中身の確かめ方も同じ。取り消し猶予は Functions も設定から取る）
+        const { value: schedule, error } = checkInput(
+            () => Schedule.create({ id: "preview", now, project, ...fields, cancelMinutes }),
+        );
+        return { request, schedule, error };
     }
 
     async function submit(event: FormEvent) {
         event.preventDefault();
-        const { error, request, schedule } = readForm();
-        if (disabled || error || !request || !schedule) return;
+        const { error, request, schedule } = readForm(Date.now());
+        if (disabled || error || !schedule) return;
         if (!confirm(
             `${sessionTitle(schedule)}\n`
             + `${schedule.summary}、${targetLabel(schedule)}を数えます。\n`
@@ -134,9 +107,10 @@ export default function NewScheduleForm(
         }
     }
 
-    const hint = form.error
-        || `${form.schedule!.summary}（${targetLabel(form.schedule!)}）。`
-            + `最初の回は ${dateLabel(form.schedule!.nextDate!)}。${form.schedule!.cancelLabel}`;
+    const hint = form.schedule
+        ? `${form.schedule.summary}（${targetLabel(form.schedule)}）。`
+            + `最初の回は ${dateLabel(form.schedule.nextDate!)}。${form.schedule.cancelLabel}`
+        : form.error;
 
     return (
         <section>

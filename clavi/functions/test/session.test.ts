@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Session } from '../src/session.ts';
+import { Session, validateSessionTerms } from '../src/session.ts';
+import { InvalidInputError } from '../src/errors.ts';
 import type { SessionData } from '../src/model.ts';
 
 const MIN = 60 * 1000;
@@ -156,4 +157,18 @@ test('取り消し: 期限より前の active だけ。取り消したら精算�
   assert.equal(s.isClaimable(NOW), false);
   assert.equal(s.isCancelable(NOW), false);
   assert.equal(s.displayStatus(NOW + 200 * MIN), 'canceled');
+});
+
+test('validateSessionTerms: 正しくなければ、画面に出せる文の InvalidInputError を投げる', () => {
+  const ok = { requiredSec: 3600, startAt: null, due: NOW + 120 * MIN, dollars: 5 };
+  assert.doesNotThrow(() => validateSessionTerms(ok, NOW));
+  const fails = (patch: Partial<typeof ok> | { startAt: number }, message: RegExp) =>
+    assert.throws(() => validateSessionTerms({ ...ok, ...patch }, NOW), (err) => err instanceof InvalidInputError && message.test(err.message));
+  fails({ due: NOW }, /締切が過ぎています/);
+  fails({ startAt: NOW - 31 * 24 * 60 * MIN }, /30日前まで/);
+  fails({ requiredSec: 0 }, /作業時間を入力/);
+  fails({ dollars: 0 }, /\$1以上/);
+  fails({ requiredSec: 3 * 3600 }, /締切まで2時間00分しかありません/);
+  // カウント開始を指定したら、そこから締切までで比べる
+  fails({ startAt: NOW + 90 * MIN }, /締切まで30分しかありません/);
 });
