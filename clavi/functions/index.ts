@@ -140,11 +140,9 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
     const startAt = data.startAt == null ? now : Math.floor(Number(data.startAt));
     const due = Math.floor(Number(data.due));
     const dollars = Math.floor(Number(data.dollars));
-    const cancelMinutes = data.cancelMinutes == null ? null : Number(data.cancelMinutes);
     if (!(requiredSec > 0)) throw invalid('作業時間を入力してください');
     if (!(dollars >= 1)) throw invalid('金額は$1以上にしてください');
     if (!(due > now)) throw invalid('締切が過ぎています');
-    if (cancelMinutes != null && !isCancelMinutes(cancelMinutes)) throw invalid('取り消せる期限が正しくありません');
     if (!(startAt >= now - MAX_START_PAST_MS)) throw invalid('カウント開始は30日前までにしてください');
     if (!(due - startAt >= requiredSec * 1000)) throw invalid('カウント開始から締切までが、作業時間より短くなっています');
 
@@ -157,11 +155,11 @@ export const startSession = onAuthenticatedCall<StartSessionRequest, StartSessio
       throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
     }
 
-    // 期限がもう過ぎているなら、取り消せないセッションにする
-    const cancelableUntil = cancelMinutes == null ? null : startAt - cancelMinutes * MIN;
+    // 取り消せる期限は設定の猶予から決まる。期限がもう過ぎているなら、取り消せないセッションにする
+    const cancelableUntil = startAt - settings.cancelMinutes * MIN;
     const session = Session.start({
       id: randomUUID(), now, project, tag, requiredSec, startAt, due, dollars,
-      cancelableUntil: cancelableUntil != null && cancelableUntil > now ? cancelableUntil : null,
+      cancelableUntil: cancelableUntil > now ? cancelableUntil : null,
     });
     await sessionsRef(uid).doc(session.id).set(session);
     // 次の入力欄の初期値にする

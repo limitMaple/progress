@@ -199,8 +199,6 @@ export interface StartSessionRequest {
   startAt: number | null;
   due: number;
   dollars: number;
-  /** カウント開始のこの分前まで取り消せる。null なら取り消せない */
-  cancelMinutes: number | null;
 }
 
 export interface CreateScheduleRequest {
