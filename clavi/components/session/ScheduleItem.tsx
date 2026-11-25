@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { formatDay, formatDeadline, formatDuration, sessionTitle } from "@/functions/src/progress";
 import { dateLabel } from "@/functions/src/calendar";
 import type { Schedule } from "@/functions/src/schedule";
-import { targetLabel, type Message } from "@/components/session/common";
+import { targetLabel, type ItemProps } from "@/components/session/common";
 
 // 先の回をいくつ見せるか
 const UPCOMING = 3;
@@ -14,12 +14,7 @@ const UPCOMING = 3;
  * スケジュール 1 件と、これからの回。
  * 各回のセッションは取り消せる期限の 1 日前に作られ、「セッション」タブから取り消せる。
  */
-export default function ScheduleItem({ uid, schedule, now, setMessage }: {
-    uid: string;
-    schedule: Schedule;
-    now: number;
-    setMessage: (message: Message) => void;
-}) {
+export default function ScheduleItem({ uid, item: schedule, now, setMessage }: ItemProps<Schedule>) {
     const occurrences = schedule.upcoming(now, UPCOMING);
 
     async function remove() {

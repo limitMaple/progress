@@ -4,39 +4,109 @@ import { useState, type KeyboardEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { useSchedules, useSessions, useSettings } from "@/lib/account";
-import { useNow, type Message, type PanelProps } from "@/components/session/common";
-import SessionsPanel from "@/components/session/SessionsPanel";
-import SchedulesPanel from "@/components/session/SchedulesPanel";
+import type { Schedule } from "@/functions/src/schedule";
+import type { Session } from "@/functions/src/session";
+import { useNow, type FormProps, type ItemProps, type Message, type PanelProps } from "@/components/session/common";
+import NewScheduleForm from "@/components/session/NewScheduleForm";
+import NewSessionForm from "@/components/session/NewSessionForm";
+import RefreshButton from "@/components/session/RefreshButton";
+import ScheduleItem from "@/components/session/ScheduleItem";
+import SessionItem from "@/components/session/SessionItem";
 
-// 画面はタブで分ける。タブ 1 枚を Tab として持ち、Home はタブの並びと中身を出すだけにする
-// （タブによる分岐を書かない）。タブを足すときは、パネルの部品を書いて TABS に足す。
-// どのパネルも PanelProps を受け取るので、渡すものは増やさなくてよい。
+// 画面はタブで分ける。どのタブも「一覧」と「新しい〜」でできているので、中身は Panel が描き、
+// タブごとに違うところだけを Tab として TABS に持つ（タブによる分岐を書かない）。
+// タブを足すときは、一覧の 1 件の部品と入力欄の部品を書いて、TABS に 1 つ足す。
+
+/** 一覧に出せるもの。Session も Schedule も id で見分ける。 */
+interface Listed {
+    id: string;
+}
 
 /** タブ 1 枚。 */
-interface Tab {
+interface Tab<T extends Listed> {
     label: string;
+    /** 一覧に出すもの */
+    items(props: PanelProps): T[];
     /** タブに出す、いま抱えているものの数。0 なら出さない */
-    count(props: PanelProps): number;
-    Panel(props: PanelProps): ReactNode;
+    count(items: T[]): number;
+    /** 一覧の 1 件 */
+    Item(props: ItemProps<T>): ReactNode;
+    /** 一覧が空のときの文 */
+    empty: string;
+    /** 見出しの右に置くボタン。無ければ null */
+    Action: ((props: PanelProps) => ReactNode) | null;
+    /** 「新しい〜」の入力欄 */
+    Form(props: FormProps): ReactNode;
 }
 
 const TABS = {
     sessions: {
         label: "セッション",
+        items: ({ sessions }) => sessions,
         // まだ終わっていない（進行中・要確認の）セッションの数
-        count: ({ sessions }) => sessions.filter((s) => !s.isSettled).length,
-        Panel: SessionsPanel,
-    },
+        count: (sessions) => sessions.filter((s) => !s.isSettled).length,
+        Item: SessionItem,
+        empty: "セッションはまだありません",
+        Action: RefreshButton,
+        Form: NewSessionForm,
+    } satisfies Tab<Session>,
     schedules: {
         label: "スケジュール",
-        count: ({ schedules }) => schedules.length,
-        Panel: SchedulesPanel,
-    },
-} satisfies Record<string, Tab>;
+        items: ({ schedules }) => schedules,
+        count: (schedules) => schedules.length,
+        Item: ScheduleItem,
+        empty: "スケジュールはまだありません",
+        Action: null,
+        Form: NewScheduleForm,
+    } satisfies Tab<Schedule>,
+};
 
 type TabKey = keyof typeof TABS;
 
 const TAB_KEYS = Object.keys(TABS) as TabKey[];
+
+/** そのタブ。中身の型（Session か Schedule か）は TABS の中でだけ見るので、ここでは Listed として扱う。 */
+const tabOf = (key: TabKey) => TABS[key] as unknown as Tab<Listed>;
+
+/** タブ 1 枚の中身。一覧と「新しい〜」の入力欄を出す。 */
+function Panel({ tab, panel }: { tab: Tab<Listed>; panel: PanelProps }) {
+    const { uid, settings, now, setBusy, setMessage, disabled } = panel;
+    const items = tab.items(panel);
+
+    return (
+        <>
+            <section>
+                <div className="section-head">
+                    <h2>一覧</h2>
+                    {tab.Action && <tab.Action {...panel} />}
+                </div>
+                <ul className="session-list">
+                    {items.map((item) => (
+                        <tab.Item
+                            key={item.id}
+                            uid={uid}
+                            item={item}
+                            now={now}
+                            busy={disabled}
+                            setBusy={setBusy}
+                            setMessage={setMessage}
+                        />
+                    ))}
+                </ul>
+                {items.length === 0 && <p className="muted">{tab.empty}</p>}
+            </section>
+
+            <tab.Form
+                initialRequiredSec={settings.lastRequiredSec}
+                projects={settings.projects}
+                tags={settings.tags}
+                disabled={disabled}
+                setBusy={setBusy}
+                setMessage={setMessage}
+            />
+        </>
+    );
+}
 
 /**
  * ログイン後の画面。セッションとスケジュールをタブで分ける。
@@ -54,8 +124,8 @@ export default function Home() {
 
     const hasTokens = Boolean(settings?.hasTogglToken && settings?.hasBeeminderToken);
 
-    // 入力欄の初期値に設定を使うので、設定を読み込むまでパネルは描かない
-    const props: PanelProps | null = settings && {
+    // 入力欄の初めの値に設定を使うので、設定を読み込むまでパネルは描かない
+    const panel: PanelProps | null = settings && {
         uid,
         settings,
         sessions,
@@ -94,7 +164,7 @@ export default function Home() {
             <div className="tabs" role="tablist" aria-label="画面" onKeyDown={moveSelection}>
                 {TAB_KEYS.map((key) => {
                     const selected = key === tab;
-                    const count = props ? TABS[key].count(props) : 0;
+                    const count = panel ? tabOf(key).count(tabOf(key).items(panel)) : 0;
                     return (
                         <button
                             key={key}
@@ -114,14 +184,11 @@ export default function Home() {
                 })}
             </div>
 
-            {TAB_KEYS.map((key) => {
-                const { Panel } = TABS[key];
-                return (
-                    <div key={key} role="tabpanel" id={`panel-${key}`} aria-labelledby={`tab-${key}`} hidden={key !== tab}>
-                        {props && <Panel {...props} />}
-                    </div>
-                );
-            })}
+            {TAB_KEYS.map((key) => (
+                <div key={key} role="tabpanel" id={`panel-${key}`} aria-labelledby={`tab-${key}`} hidden={key !== tab}>
+                    {panel && <Panel tab={tabOf(key)} panel={panel} />}
+                </div>
+            ))}
         </main>
     );
 }

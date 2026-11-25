@@ -5,7 +5,7 @@ import { cancelSession, db, settleNow } from "@/lib/firebase";
 import { formatDuration, formatDeadline } from "@/functions/src/progress";
 import type { ChargeResolution } from "@/functions/src/model";
 import type { DisplayStatus, Session } from "@/functions/src/session";
-import { targetLabel, type Message } from "@/components/session/common";
+import { targetLabel, type ItemProps } from "@/components/session/common";
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
     waiting: "開始前",
@@ -17,14 +17,8 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
     canceled: "取り消し",
 };
 
-export default function SessionItem({ uid, session, now, busy, setBusy, setMessage }: {
-    uid: string;
-    session: Session;
-    now: number;
-    busy: boolean;
-    setBusy: (busy: boolean) => void;
-    setMessage: (message: Message) => void;
-}) {
+/** セッション 1 件。一覧の 1 件として、Home の TABS から使う。 */
+export default function SessionItem({ uid, item: session, now, busy, setBusy, setMessage }: ItemProps<Session>) {
     const status = session.displayStatus(now);
     const remainingTime = session.due - now;
     const left = session.requiredSec - session.trackedSec;

@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { startSession } from "@/lib/firebase";
 import { localDateTime, formatDuration, formatDay, formatDeadline } from "@/functions/src/progress";
 import { MAX_START_PAST_MS } from "@/functions/src/model";
-import type { StartSessionRequest, TogglProject } from "@/functions/src/model";
-import { useNow, targetLabel, type Message } from "@/components/session/common";
+import type { StartSessionRequest } from "@/functions/src/model";
+import { useNow, targetLabel, type FormProps } from "@/components/session/common";
 import StartConfirmDialog from "@/components/session/StartConfirmDialog";
+import {
+    DollarsField, DurationField, ProjectField, SubmitRow, TagField,
+    dollarsOf, durationValues, requiredSecOf, useFormValues,
+} from "@/components/session/fields";
 
 const MIN = 60 * 1000;
+// 手で作るセッションは日をまたいでもよいので、作業時間は 99 時間まで
+const MAX_HOURS = 99;
 
 /** 確認画面に出す、開始しようとしている内容。 */
 export type Draft = StartSessionRequest & { projectName: string };
@@ -38,42 +44,25 @@ function initialValues(requiredSec: number): FormValues {
         deadlineDate: "",
         deadlineTime: "",
         cancelMinutes: "",
-        hours: String(Math.floor(requiredSec / 3600)),
-        minutes: String(Math.floor((requiredSec % 3600) / 60)),
+        ...durationValues(requiredSec),
         dollars: "0",
     };
 }
 
-/**
- * 新しいセッションの入力欄。
- * initialRequiredSec は作るときに 1 回だけ使う（あとで設定が変わっても、入力中の値は上書きしない）。
- * projects と tags は選択肢なので、設定が変われば追従する。
- */
-export default function NewSessionForm({ initialRequiredSec, projects, tags, disabled, setBusy, setMessage }: {
-    initialRequiredSec: number;
-    projects: TogglProject[];
-    tags: string[];
-    disabled: boolean;
-    setBusy: (busy: boolean) => void;
-    setMessage: (message: Message) => void;
-}) {
-    const [values, setValues] = useState(() => initialValues(initialRequiredSec));
+/** 新しいセッションの入力欄。開始する前に確認画面（StartConfirmDialog）を出す。 */
+export default function NewSessionForm({ initialRequiredSec, projects, tags, disabled, setBusy, setMessage }: FormProps) {
+    const { values, change } = useFormValues(() => initialValues(initialRequiredSec));
     const [draft, setDraft] = useState<Draft | null>(null);
     // 残り時間の表示を進めるためだけに、30 秒ごとに描き直す
     useNow();
-
-    const change = (key: keyof FormValues) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { value } = e.target;
-        setValues((v) => ({ ...v, [key]: value }));
-    };
 
     const form = readForm();
 
     function readForm() {
         const now = Date.now();
         const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
-        const requiredSec = (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60;
-        const amount = Math.floor(Number(values.dollars) || 0);
+        const requiredSec = requiredSecOf(values);
+        const amount = dollarsOf(values);
         // カウント開始は空欄なら null（開始した時刻から数える）。日付だけならその日の 0:00
         const startAt = values.startDate ? localDateTime(values.startDate, values.startTime) : null;
         const due = values.deadlineTime ? localDateTime(values.deadlineDate, values.deadlineTime) : null;
@@ -154,27 +143,8 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
         <section>
             <h2>新しいセッション</h2>
             <form className="session-form" onSubmit={review} noValidate>
-                <label>
-                    <span>プロジェクト</span>
-                    <select value={values.projectId} onChange={change("projectId")}>
-                        <option value="">指定なし</option>
-                        {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-                    </select>
-                </label>
-
-                <label>
-                    <span>タグ</span>
-                    <input
-                        list="tag-options"
-                        placeholder="空欄ならタグで絞らない"
-                        autoComplete="off"
-                        value={values.tag}
-                        onChange={change("tag")}
-                    />
-                </label>
-                <datalist id="tag-options">
-                    {tags.map((name) => <option key={name} value={name} />)}
-                </datalist>
+                <ProjectField values={values} change={change} projects={projects} />
+                <TagField values={values} change={change} tags={tags} />
 
                 <label>
                     <span>カウント開始</span>
@@ -206,34 +176,10 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
                     </span>
                 </label>
 
-                <label>
-                    <span>作業時間</span>
-                    <span className="row">
-                        <input
-                            type="number" min="0" max="99" className="num"
-                            value={values.hours} onChange={change("hours")}
-                        />時間
-                        <input
-                            type="number" min="0" max="59" step="5" className="num"
-                            value={values.minutes} onChange={change("minutes")}
-                        />分
-                    </span>
-                </label>
+                <DurationField values={values} change={change} maxHours={MAX_HOURS} />
+                <DollarsField values={values} change={change} />
 
-                <label>
-                    <span>金額</span>
-                    <span className="row">
-                        $<input
-                            type="number" min="1" step="1" className="num"
-                            value={values.dollars} onChange={change("dollars")}
-                        />
-                    </span>
-                </label>
-
-                <p className={`hint ${form.error ? "error" : ""}`}>{hint}</p>
-                <button type="submit" className="primary" disabled={disabled || Boolean(form.error)}>
-                    内容を確認する
-                </button>
+                <SubmitRow hint={hint} error={form.error} disabled={disabled}>内容を確認する</SubmitRow>
             </form>
 
             {draft && (

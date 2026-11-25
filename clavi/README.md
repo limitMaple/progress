@@ -51,10 +51,11 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
 
 - `app/`, `components/` … 画面（Next.js の静的書き出し、Firebase Hosting に置く）
   - ログインとログアウトは `components/AuthGate.tsx` だけで扱い、`app/layout.tsx` で全ページを包む
-  - `components/Home.tsx` … ログイン後の画面。タブ 1 枚を `TABS` に並べ、中身は `session/SessionsPanel.tsx` と
-    `session/SchedulesPanel.tsx` に分ける（タブを足すときはパネルを書いて `TABS` に足す）
-  - どちらのパネルも描いたままにして（開いていない方は hidden）、タブを行き来しても入力中の値を消さない
-  - データの読み込みと「何かの処理中か」は `Home.tsx` が持ち、`PanelProps`（`session/common.ts`）でパネルに渡す
+  - `components/Home.tsx` … ログイン後の画面。どのタブも「一覧」と「新しい〜」でできているので、中身は `Panel` が描き、
+    タブごとに違うところ（一覧に出すもの・1 件の部品・入力欄）だけを `TABS` に持つ。タブを足すときはここに 1 つ足す
+  - どちらのタブも描いたままにして（開いていない方は hidden）、タブを行き来しても入力中の値を消さない
+  - データの読み込みと「何かの処理中か」は `Home.tsx` が持ち、`PanelProps`（`session/common.ts`）で中身に渡す
+  - `components/session/fields.tsx` … 2 つの入力欄で同じ欄（プロジェクト・タグ・作業時間・金額）と、値の持ち方（`useFormValues`）
 - `lib/` … 画面側の Firebase への接続、画面から呼ぶ関数の定義、データの読み込み
 - `functions/` … Cloud Functions（TypeScript。`tsc` で `lib/` に書き出し、デプロイ前に自動でビルドされる）
   - `index.ts` … 画面から呼ぶ関数（設定の保存・開始・取り消し・更新・精算・スケジュールの作成）と、1分おきの自動精算・スケジュールからのセッション作成

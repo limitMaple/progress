@@ -1,14 +1,21 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { type FormEvent } from "react";
 import { createSchedule } from "@/lib/firebase";
 import { formatDuration, sessionTitle } from "@/functions/src/progress";
 import { dateLabel } from "@/functions/src/calendar";
 import { recurrenceFrom } from "@/functions/src/recurrence";
 import { parseClock, Schedule, windowMinutes } from "@/functions/src/schedule";
-import type { RecurrenceData, TogglProject } from "@/functions/src/model";
-import { targetLabel, type Message } from "@/components/session/common";
+import type { RecurrenceData } from "@/functions/src/model";
+import { targetLabel, type FormProps } from "@/components/session/common";
 import RecurrenceFields, { RECURRENCE_EDITORS } from "@/components/session/RecurrenceFields";
+import {
+    DollarsField, DurationField, ProjectField, SubmitRow, TagField,
+    dollarsOf, durationValues, requiredSecOf, useFormValues,
+} from "@/components/session/fields";
+
+// 1 回のセッションは日をまたいでも 1 日に収まるので、作業時間は 23 時間まで
+const MAX_HOURS = 23;
 
 type FormValues = {
     projectId: string;
@@ -38,38 +45,22 @@ function initialValues(requiredSec: number): FormValues {
         startTime: "",
         deadlineTime: "",
         cancelMinutes: "60",
-        hours: String(Math.floor(requiredSec / 3600)),
-        minutes: String(Math.floor((requiredSec % 3600) / 60)),
+        ...durationValues(requiredSec),
         dollars: "0",
     };
 }
 
-/**
- * 新しいスケジュールの入力欄。各回のセッションは、取り消せる期限の 1 日前に作られる。
- * 引数の扱いは NewSessionForm と同じ。
- */
-export default function NewScheduleForm({ initialRequiredSec, projects, tags, disabled, setBusy, setMessage }: {
-    initialRequiredSec: number;
-    projects: TogglProject[];
-    tags: string[];
-    disabled: boolean;
-    setBusy: (busy: boolean) => void;
-    setMessage: (message: Message) => void;
-}) {
-    const [values, setValues] = useState(() => initialValues(initialRequiredSec));
-
-    const change = (key: Exclude<keyof FormValues, "repeat">) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { value } = e.target;
-        setValues((v) => ({ ...v, [key]: value }));
-    };
+/** 新しいスケジュールの入力欄。各回のセッションは、取り消せる期限の 1 日前に作られる。 */
+export default function NewScheduleForm({ initialRequiredSec, projects, tags, disabled, setBusy, setMessage }: FormProps) {
+    const { values, setValues, change } = useFormValues(() => initialValues(initialRequiredSec));
 
     const form = readForm();
 
     function readForm() {
         const now = Date.now();
         const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
-        const requiredSec = (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60;
-        const dollars = Math.floor(Number(values.dollars) || 0);
+        const requiredSec = requiredSecOf(values);
+        const dollars = dollarsOf(values);
         const startMinutes = parseClock(values.startTime);
         const dueMinutes = parseClock(values.deadlineTime);
         const cancelMinutes = Number(values.cancelMinutes);
@@ -152,27 +143,8 @@ export default function NewScheduleForm({ initialRequiredSec, projects, tags, di
         <section>
             <h2>新しいスケジュール</h2>
             <form className="session-form" onSubmit={submit} noValidate>
-                <label>
-                    <span>プロジェクト</span>
-                    <select value={values.projectId} onChange={change("projectId")}>
-                        <option value="">指定なし</option>
-                        {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-                    </select>
-                </label>
-
-                <label>
-                    <span>タグ</span>
-                    <input
-                        list="schedule-tag-options"
-                        placeholder="空欄ならタグで絞らない"
-                        autoComplete="off"
-                        value={values.tag}
-                        onChange={change("tag")}
-                    />
-                </label>
-                <datalist id="schedule-tag-options">
-                    {tags.map((name) => <option key={name} value={name} />)}
-                </datalist>
+                <ProjectField values={values} change={change} projects={projects} />
+                <TagField values={values} change={change} tags={tags} />
 
                 <RecurrenceFields value={values.repeat} onChange={(repeat) => setValues((v) => ({ ...v, repeat }))} />
 
@@ -203,34 +175,10 @@ export default function NewScheduleForm({ initialRequiredSec, projects, tags, di
                 </label>
                 <p className="field-note muted">休みたい回は、この期限までにそのセッションを取り消します。</p>
 
-                <label>
-                    <span>作業時間</span>
-                    <span className="row">
-                        <input
-                            type="number" min="0" max="23" className="num"
-                            value={values.hours} onChange={change("hours")}
-                        />時間
-                        <input
-                            type="number" min="0" max="59" step="5" className="num"
-                            value={values.minutes} onChange={change("minutes")}
-                        />分
-                    </span>
-                </label>
+                <DurationField values={values} change={change} maxHours={MAX_HOURS} />
+                <DollarsField values={values} change={change} />
 
-                <label>
-                    <span>金額</span>
-                    <span className="row">
-                        $<input
-                            type="number" min="1" step="1" className="num"
-                            value={values.dollars} onChange={change("dollars")}
-                        />
-                    </span>
-                </label>
-
-                <p className={`hint ${form.error ? "error" : ""}`}>{hint}</p>
-                <button type="submit" className="primary" disabled={disabled || Boolean(form.error)}>
-                    スケジュールを作る
-                </button>
+                <SubmitRow hint={hint} error={form.error} disabled={disabled}>スケジュールを作る</SubmitRow>
             </form>
         </section>
     );
