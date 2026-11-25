@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DailyRecurrence, MonthlyByDayRecurrence, MonthlyByWeekdayRecurrence, WeeklyRecurrence, recurrenceFrom, weekdaysLabel,
+  DailyRecurrence, MonthlyByDayRecurrence, MonthlyByWeekdayRecurrence, WeeklyRecurrence, recurrenceFrom,
 } from '../src/recurrence.ts';
 import type { Recurrence } from '../src/recurrence.ts';
 import { Temporal } from '../src/calendar.ts';
@@ -41,7 +41,8 @@ test('毎週: 曜日の表示', () => {
   assert.equal(weekly([0, 1, 2, 3, 4, 5, 6]), '毎日');
   assert.equal(weekly([5, 1, 3]), '毎週 月水金');
   // 日曜は最後に並べる
-  assert.equal(weekdaysLabel([0, 1]), '月日');
+  assert.equal(weekly([0, 1]), '毎週 月日');
+  assert.equal(new WeeklyRecurrence({ from: '2026-10-30', interval: 2, weekdays: [0, 6] }).label, '2週間ごと 土日');
 });
 
 test('毎月の日付: その日が無い月は飛ばす', () => {

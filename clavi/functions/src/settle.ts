@@ -9,8 +9,11 @@
 import { loadAccount, sessionsRef, claimSettlement, saveChanges, ConflictError } from './store.ts';
 import { beeminderClient } from './api.ts';
 import { fetchTimeEntries } from './sync.ts';
-import type { ChargeResolution, SettleResult } from './model.ts';
+import type { ChargeResolution, SettleResult } from './requests.ts';
 import type { Session } from './session.ts';
+
+/** Beeminder の課金に付けるメモ。履歴と突き合わせられるよう、ID の頭を入れておく。 */
+export const chargeNote = ({ title, id }: Pick<Session, 'title' | 'id'>) => `Toggl Ratchet: ${title} (${id.slice(0, 8)})`;
 
 const resultOf = (session: Session): SettleResult => ({
   status: session.status,
@@ -54,7 +57,7 @@ export async function settleSession(uid: string, session: Session): Promise<Sett
     const result = await beeminderClient(tokens.beeminderToken).charge({
       user: settings.beeminderUser,
       amount: session.dollars,
-      note: session.chargeNote(),
+      note: chargeNote(session),
     });
     session.settleAsCharged(trackedSec, {
       id: String(result?.id ?? ''),

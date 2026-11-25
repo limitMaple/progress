@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
-    collection, doc, onSnapshot, orderBy, query, type DocumentData, type QueryConstraint,
+    collection, deleteDoc, doc, onSnapshot, orderBy, query, type DocumentData, type QueryConstraint,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { DEFAULT_SETTINGS, type ScheduleData, type SessionData, type Settings } from "@/functions/src/model";
@@ -51,3 +51,12 @@ export function useSessions(uid: string) {
 export function useSchedules(uid: string) {
     return useCollection(uid, "schedules", OLDEST_FIRST, toSchedule);
 }
+
+// 画面から直接消せるのはこの 2 つだけ（firestore.rules で許している）。ほかの書き込みは Functions を呼ぶ。
+// ページはログイン中にしか描かれないので（AuthGate）、ユーザーは auth.currentUser! で取ってよい。
+
+/** 精算の済んだ（か取り消した）セッションを、一覧から消す。 */
+export const deleteSession = (id: string) => deleteDoc(doc(db, "users", auth.currentUser!.uid, "sessions", id));
+
+/** スケジュールを消す。もう作ったセッションは残る。 */
+export const deleteSchedule = (id: string) => deleteDoc(doc(db, "users", auth.currentUser!.uid, "schedules", id));

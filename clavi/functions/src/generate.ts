@@ -6,11 +6,6 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import { canCharge, loadAccount, schedulesRef, sessionsRef } from './store.ts';
 import { dateLabel } from './calendar.ts';
-import type { Occurrence } from './schedule.ts';
-
-/** 課金できないので作らなかった回の知らせ。 */
-const skippedMessage = (skipped: readonly Occurrence[]) =>
-  `${skipped.map((o) => dateLabel(o.date)).join('、')}の回は、BeeminderのAPIトークンが未設定なので作りませんでした`;
 
 /**
  * セッションを作る時刻を迎えた回のセッションを作り、次の回へ進める。作ったセッションの ID を返す。
@@ -25,9 +20,13 @@ export async function generateSessions(uid: string, scheduleId: string, now = Da
     if (!schedule || schedule.nextCreateAt == null || schedule.nextCreateAt > now) return [];
 
     const { ready, next } = schedule.readyOccurrences(now);
-    const advance = schedule.nextFieldsFor(next);
+    const advance = schedule.nextOccurrenceFields(next);
     if (!chargeable) {
-      tx.update(ref, { ...advance, message: ready.length ? skippedMessage(ready) : schedule.message });
+      const skipped = ready.map((o) => dateLabel(o.date)).join('、');
+      tx.update(ref, {
+        ...advance,
+        message: skipped ? `${skipped}の回は、BeeminderのAPIトークンが未設定なので作りませんでした` : schedule.message,
+      });
       return [];
     }
 

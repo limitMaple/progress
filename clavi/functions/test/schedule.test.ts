@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CREATE_AHEAD, Schedule, windowMinutes } from '../src/schedule.ts';
 import { InvalidInputError } from '../src/errors.ts';
+import { scheduleSummary } from '../src/scheduleView.ts';
+import { displayStatus } from '../src/sessionView.ts';
+import { cancelLabel } from '../src/cancel.ts';
 import { dateLabel, isDate, isTimeZone, zonedDate, zonedTime } from '../src/calendar.ts';
 import type { ScheduleData } from '../src/model.ts';
 
@@ -80,10 +83,10 @@ test('締切が開始の時刻以前なら翌日', () => {
   });
   assert.equal(windowMinutes(s), 180);
   assert.equal(s.occurrenceAt('2026-10-30').due, jst('2026-10-31T01:00:00'));
-  assert.equal(s.summary, '毎週 金 22:00〜翌1:00 に 2時間00分');
-  assert.equal(make().summary, '平日 9:00〜18:00 に 2時間00分');
-  assert.equal(make().cancelLabel, 'カウント開始の1時間00分前まで取り消せます');
-  assert.equal(make({ cancelMinutes: 0 }).cancelLabel, 'カウント開始まで取り消せます');
+  assert.equal(scheduleSummary(s), '毎週 金 22:00〜翌1:00 に 2時間00分');
+  assert.equal(scheduleSummary(make()), '平日 9:00〜18:00 に 2時間00分');
+  assert.equal(cancelLabel(make().cancelMinutes), 'カウント開始の1時間00分前まで取り消せます');
+  assert.equal(cancelLabel(0), 'カウント開始まで取り消せます');
 });
 
 test('upcoming: 回の日の、カウント開始が後のものから順に', () => {
@@ -128,7 +131,7 @@ test('readyOccurrences: 回がもう無ければ、次の回は null', () => {
     nextDate: '2027-02-01',
   });
   assert.deepEqual(s.readyOccurrences(jst('2027-02-28T10:00:00')), { ready: [], next: null });
-  assert.deepEqual(s.nextFieldsFor(null), { nextDate: null, nextCreateAt: null });
+  assert.deepEqual(s.nextOccurrenceFields(null), { nextDate: null, nextCreateAt: null });
 });
 
 test('sessionFor: ID は回ごとに決まり、取り消せる期限を持つ', () => {
@@ -138,7 +141,7 @@ test('sessionFor: ID は回ごとに決まり、取り消せる期限を持つ',
   assert.equal(session.id, 'sched-1-20261030');
   assert.equal(session.scheduleId, 'sched-1');
   assert.equal(session.cancelableUntil, jst('2026-10-30T08:00:00'));
-  assert.equal(session.displayStatus(now), 'waiting');
+  assert.equal(displayStatus(session, now), 'waiting');
   assert.equal(session.isCancelable(now), true);
 });
 

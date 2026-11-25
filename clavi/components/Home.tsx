@@ -4,115 +4,44 @@ import { useState, type KeyboardEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { useSchedules, useSessions, useSettings } from "@/lib/account";
-import type { Schedule } from "@/functions/src/schedule";
-import type { Session } from "@/functions/src/session";
-import { useNow, type FormProps, type ItemProps, type Message, type PanelProps } from "@/components/session/common";
-import NewScheduleForm from "@/components/session/NewScheduleForm";
-import NewSessionForm from "@/components/session/NewSessionForm";
-import RefreshButton from "@/components/session/RefreshButton";
-import ScheduleItem from "@/components/session/ScheduleItem";
-import SessionItem from "@/components/session/SessionItem";
+import { useNow } from "@/components/session/useNow";
+import { type AccountData, type TabProps } from "@/components/session/types";
+import { ActivityProvider, useActivityState } from "@/components/session/activity";
+import SchedulesTab from "@/components/session/SchedulesTab";
+import SessionsTab from "@/components/session/SessionsTab";
 
-// 画面はタブで分ける。どのタブも「一覧」と「新しい〜」でできているので、中身は Panel が描き、
-// タブごとに違うところだけを Tab として TABS に持つ（タブによる分岐を書かない）。
-// タブを足すときは、一覧の 1 件の部品と入力欄の部品を書いて、TABS に 1 つ足す。
-
-/** 一覧に出せるもの。Session も Schedule も id で見分ける。 */
-interface Listed {
-    id: string;
-}
+// ログイン後の画面。Home はデータを読み、操作の処理中と知らせ（Activity）を持ち、タブを切り替えるだけ。
+// タブの中身は各タブの部品が描く。タブを足すときは、TabProps を受け取る部品を書いて TABS に 1 つ足す。
 
 /** タブ 1 枚。 */
-interface Tab<T extends Listed> {
+interface Tab {
     label: string;
-    /** 一覧に出すもの */
-    items(props: PanelProps): T[];
     /** タブに出す、いま抱えているものの数。0 なら出さない */
-    count(items: T[]): number;
-    /** 一覧の 1 件 */
-    Item(props: ItemProps<T>): ReactNode;
-    /** 一覧が空のときの文 */
-    empty: string;
-    /** 見出しの右に置くボタン。無ければ null */
-    Action: ((props: PanelProps) => ReactNode) | null;
-    /** 「新しい〜」の入力欄 */
-    Form(props: FormProps): ReactNode;
+    count(data: AccountData): number;
+    Content(props: TabProps): ReactNode;
 }
 
 const TABS = {
     sessions: {
         label: "セッション",
-        items: ({ sessions }) => sessions,
         // まだ終わっていない（進行中・要確認の）セッションの数
-        count: (sessions) => sessions.filter((s) => !s.isSettled).length,
-        Item: SessionItem,
-        empty: "セッションはまだありません",
-        Action: RefreshButton,
-        Form: NewSessionForm,
-    } satisfies Tab<Session>,
+        count: ({ sessions }) => sessions.filter((s) => !s.isSettled).length,
+        Content: SessionsTab,
+    },
     schedules: {
         label: "スケジュール",
-        items: ({ schedules }) => schedules,
-        count: (schedules) => schedules.length,
-        Item: ScheduleItem,
-        empty: "スケジュールはまだありません",
-        Action: null,
-        Form: NewScheduleForm,
-    } satisfies Tab<Schedule>,
-};
+        count: ({ schedules }) => schedules.length,
+        Content: SchedulesTab,
+    },
+} satisfies Record<string, Tab>;
 
 type TabKey = keyof typeof TABS;
 
 const TAB_KEYS = Object.keys(TABS) as TabKey[];
 
-/** そのタブ。中身の型（Session か Schedule か）は TABS の中でだけ見るので、ここでは Listed として扱う。 */
-const tabOf = (key: TabKey) => TABS[key] as unknown as Tab<Listed>;
-
-/** タブ 1 枚の中身。一覧と「新しい〜」の入力欄を出す。 */
-function Panel({ tab, panel }: { tab: Tab<Listed>; panel: PanelProps }) {
-    const { uid, settings, now, setBusy, setMessage, disabled } = panel;
-    const items = tab.items(panel);
-
-    return (
-        <>
-            <section>
-                <div className="section-head">
-                    <h2>一覧</h2>
-                    {tab.Action && <tab.Action {...panel} />}
-                </div>
-                <ul className="session-list">
-                    {items.map((item) => (
-                        <tab.Item
-                            key={item.id}
-                            uid={uid}
-                            item={item}
-                            now={now}
-                            busy={disabled}
-                            setBusy={setBusy}
-                            setMessage={setMessage}
-                        />
-                    ))}
-                </ul>
-                {items.length === 0 && <p className="muted">{tab.empty}</p>}
-            </section>
-
-            <tab.Form
-                initialRequiredSec={settings.lastRequiredSec}
-                projects={settings.projects}
-                tags={settings.tags}
-                cancelMinutes={settings.cancelMinutes}
-                now={now}
-                disabled={disabled}
-                setBusy={setBusy}
-                setMessage={setMessage}
-            />
-        </>
-    );
-}
-
 /**
- * ログイン後の画面。セッションとスケジュールをタブで分ける。
- * どちらのパネルも描いたままにして（開いていない方は hidden）、タブを行き来しても入力中の値が消えないようにする。
+ * どのタブも描いたままにして（開いていない方は hidden）、タブを行き来しても入力中の値が消えないようにする。
+ * 入力欄の初めの値に設定を使うので、設定を読み込むまでタブの中身は描かない。
  */
 export default function Home() {
     const uid = auth.currentUser!.uid;
@@ -120,28 +49,16 @@ export default function Home() {
     const sessions = useSessions(uid);
     const schedules = useSchedules(uid);
     const now = useNow();
-    const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState<Message>({ text: "", kind: "" });
+    const { activity, message, clearMessage } = useActivityState();
     const [tab, setTab] = useState<TabKey>("sessions");
 
-    const hasTokens = Boolean(settings?.hasTogglToken && settings?.hasBeeminderToken);
-
-    // 入力欄の初めの値に設定を使うので、設定を読み込むまでパネルは描かない
-    const panel: PanelProps | null = settings && {
-        uid,
-        settings,
-        sessions,
-        schedules,
-        now,
-        setBusy,
-        setMessage,
-        disabled: busy || !hasTokens,
-    };
+    const data: AccountData | null = settings && { settings, sessions, schedules };
+    const canCommit = Boolean(settings?.hasTogglToken && settings?.hasBeeminderToken);
 
     function select(key: TabKey) {
         setTab(key);
         // 前のタブでの知らせは、そのタブでの話なので消す
-        setMessage({ text: "", kind: "" });
+        clearMessage();
     }
 
     /** タブは左右キーでも選べるようにする（role="tab" の決まり）。 */
@@ -156,7 +73,7 @@ export default function Home() {
 
     return (
         <main>
-            {settings && !hasTokens && (
+            {settings && !canCommit && (
                 <p className="notice">
                     APIトークンが未設定です。<Link href="/settings">設定を開く</Link>
                 </p>
@@ -166,7 +83,7 @@ export default function Home() {
             <div className="tabs" role="tablist" aria-label="画面" onKeyDown={moveSelection}>
                 {TAB_KEYS.map((key) => {
                     const selected = key === tab;
-                    const count = panel ? tabOf(key).count(tabOf(key).items(panel)) : 0;
+                    const count = data ? TABS[key].count(data) : 0;
                     return (
                         <button
                             key={key}
@@ -186,11 +103,16 @@ export default function Home() {
                 })}
             </div>
 
-            {TAB_KEYS.map((key) => (
-                <div key={key} role="tabpanel" id={`panel-${key}`} aria-labelledby={`tab-${key}`} hidden={key !== tab}>
-                    {panel && <Panel tab={tabOf(key)} panel={panel} />}
-                </div>
-            ))}
+            <ActivityProvider value={activity}>
+                {TAB_KEYS.map((key) => {
+                    const { Content } = TABS[key];
+                    return (
+                        <div key={key} role="tabpanel" id={`panel-${key}`} aria-labelledby={`tab-${key}`} hidden={key !== tab}>
+                            {data && <Content data={data} now={now} canCommit={canCommit} />}
+                        </div>
+                    );
+                })}
+            </ActivityProvider>
         </main>
     );
 }

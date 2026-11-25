@@ -1,7 +1,15 @@
 // Toggl Track API v9 と Beeminder API v1 の薄いクライアント。
 // トークンを外に出さないため、呼ぶのは Cloud Functions だけ。
 
-import type { TimeEntry } from './model.ts';
+/** Toggl の time entry のうち、進捗の計算に使う部分。 */
+export interface TimeEntry {
+  start: string;
+  stop: string | null;
+  /** 計測中は負の値 */
+  duration: number;
+  project_id: number | null;
+  tags: string[] | null;
+}
 
 const TOGGL_BASE = 'https://api.track.toggl.com/api/v9';
 const BEEMINDER_BASE = 'https://www.beeminder.com/api/v1';

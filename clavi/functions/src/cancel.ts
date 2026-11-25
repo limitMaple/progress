@@ -2,7 +2,7 @@
 // 手で始めるセッション・スケジュールの各回・設定の画面が同じものを使う。
 // Web アプリからも import するので、Node に依存しないこと。
 
-import { formatDuration } from './progress.ts';
+import { formatDuration } from './format.ts';
 
 const MIN = 60 * 1000;
 

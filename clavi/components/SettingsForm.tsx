@@ -4,7 +4,8 @@ import { useState, type FormEvent } from "react";
 import { auth, saveSettings } from "@/lib/firebase";
 import { useSessions, useSettings } from "@/lib/account";
 import { cancelLabel, isCancelMinutes, MAX_CANCEL_MINUTES } from "@/functions/src/cancel";
-import type { SaveSettingsResponse, Settings } from "@/functions/src/model";
+import type { SaveSettingsResponse } from "@/functions/src/requests";
+import type { Settings } from "@/functions/src/model";
 
 /**
  * 設定の画面。

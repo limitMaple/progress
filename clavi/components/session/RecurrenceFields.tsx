@@ -13,7 +13,6 @@ import type { RecurrenceData } from "@/functions/src/model";
 
 type Kind = RecurrenceData["kind"];
 type DataOf<K extends Kind> = Extract<RecurrenceData, { kind: K }>;
-type Base = { from: string; interval: number };
 
 type FieldsProps<T> = { value: T; onChange: (value: T) => void };
 
@@ -22,7 +21,7 @@ interface RecurrenceEditor<K extends Kind> {
     /** 選択肢の名前（間隔の数のあとに続く） */
     label: string;
     /** この種類に切り替えたときの値。起点と間隔は引き継ぐ */
-    initial(base: Base): DataOf<K>;
+    initial(base: { from: string; interval: number }): DataOf<K>;
     /** この種類にだけある入力欄。無ければ null */
     Fields: ((props: FieldsProps<DataOf<K>>) => ReactNode) | null;
 }

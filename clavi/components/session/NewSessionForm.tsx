@@ -3,11 +3,15 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { startSession } from "@/lib/firebase";
-import { localDateTime, formatDuration, formatDay, formatDeadline } from "@/functions/src/progress";
+import { localDateTime } from "@/functions/src/calendar";
+import { formatDuration, formatDay, formatDeadline } from "@/functions/src/format";
 import { cancelableUntilFor, cancelLabel } from "@/functions/src/cancel";
-import { validateSessionTerms } from "@/functions/src/session";
-import type { StartSessionRequest } from "@/functions/src/model";
-import { checkInput, targetLabel, type FormProps } from "@/components/session/common";
+import { validateStartSessionInput } from "@/functions/src/session";
+import type { StartSessionRequest } from "@/functions/src/requests";
+import { checkInput } from "@/functions/src/errors";
+import { type FormProps } from "@/components/session/types";
+import { targetLabel } from "@/functions/src/format";
+import { useActivity } from "@/components/session/activity";
 import StartConfirmDialog from "@/components/session/StartConfirmDialog";
 import {
     DollarsField, DurationField, ProjectField, SubmitRow, TagField,
@@ -18,7 +22,7 @@ import {
 const MAX_HOURS = 99;
 
 /** 確認画面に出す、開始しようとしている内容。 */
-export type Draft = StartSessionRequest & {
+export type StartConfirmation = StartSessionRequest & {
     projectName: string;
     /** 取り消せる期限。取り消せないなら null */
     cancelableUntil: number | null;
@@ -55,11 +59,12 @@ function initialValues(requiredSec: number): FormValues {
  * 新しいセッションの入力欄。開始する前に確認画面（StartConfirmDialog）を出す。
  * 取り消し猶予はここでは決めず、設定の値（cancelMinutes）に従う。
  */
-export default function NewSessionForm(
-    { initialRequiredSec, projects, tags, cancelMinutes, now, disabled, setBusy, setMessage }: FormProps,
-) {
-    const { values, change } = useFormValues(() => initialValues(initialRequiredSec));
-    const [draft, setDraft] = useState<Draft | null>(null);
+export default function NewSessionForm({ settings, now, canCommit }: FormProps) {
+    const { projects, tags, cancelMinutes } = settings;
+    const { busy, run, notify } = useActivity();
+    const disabled = busy || !canCommit;
+    const { values, change } = useFormValues(() => initialValues(settings.lastRequiredSec));
+    const [draft, setDraft] = useState<StartConfirmation | null>(null);
 
     const form = readForm(now);
 
@@ -78,7 +83,7 @@ export default function NewSessionForm(
         // 入力欄の形の誤りを先に見て、中身は Functions と同じもので確かめる
         if (values.startTime && !values.startDate) return { ...fields, error: "カウント開始の日付を入力してください" };
         if (due == null) return { ...fields, error: "締切の日付と時刻を入力してください" };
-        return { ...fields, error: checkInput(() => validateSessionTerms({ requiredSec, startAt, due, dollars }, now)).error };
+        return { ...fields, error: checkInput(() => validateStartSessionInput({ requiredSec, startAt, due, dollars }, now)).error };
     }
 
     /** 開始ボタン。すぐには始めず、確認画面を開く。 */
@@ -98,33 +103,30 @@ export default function NewSessionForm(
         });
     }
 
-    async function start(draft: Draft) {
+    function start(draft: StartConfirmation) {
         // 確認画面を開いたまま時間が経つと、作業時間が締切に収まらなくなることがある
-        const { error } = checkInput(() => validateSessionTerms(draft, Date.now()));
+        const { error } = checkInput(() => validateStartSessionInput(draft, Date.now()));
         if (error) {
             setDraft(null);
-            setMessage({ text: `確認している間に時間が経ちました。直してください: ${error}`, kind: "error" });
+            notify({ text: `確認している間に時間が経ちました。直してください: ${error}`, kind: "error" });
             return;
         }
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
-            await startSession({
-                projectId: draft.projectId,
-                tag: draft.tag,
-                requiredSec: draft.requiredSec,
-                startAt: draft.startAt,
-                due: draft.due,
-                dollars: draft.dollars,
-            });
-            setDraft(null);
-            setMessage({ text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" });
-        } catch (err) {
-            setDraft(null);
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
+        // 確認画面は、終わるまで（「開始しています…」を出して）開いたままにする
+        void run(async () => {
+            try {
+                await startSession({
+                    projectId: draft.projectId,
+                    tag: draft.tag,
+                    requiredSec: draft.requiredSec,
+                    startAt: draft.startAt,
+                    due: draft.due,
+                    dollars: draft.dollars,
+                });
+                return { text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" };
+            } finally {
+                setDraft(null);
+            }
+        });
     }
 
     const hint = form.error || form.due == null

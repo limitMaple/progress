@@ -6,10 +6,11 @@
 // 休みたい回は、そのセッションを期限までに取り消す。作ったあとのセッションは手で始めたものと同じ。
 //
 // 日付は "YYYY-MM-DD"、時刻はその日の 0:00 からの分。どちらもスケジュールの timeZone で読む。
+// 画面に出す形にするのは scheduleView.ts。
 
-import { formatDuration } from './progress.ts';
-import { isMinuteOfDay, isTimeZone, minuteOfDayLabel, Temporal, zonedDate, zonedTime } from './calendar.ts';
-import { cancelDeadline, cancelLabel, isCancelMinutes } from './cancel.ts';
+import { formatDuration } from './format.ts';
+import { isMinuteOfDay, isTimeZone, Temporal, zonedDate, zonedTime } from './calendar.ts';
+import { cancelDeadline, isCancelMinutes } from './cancel.ts';
 import { InvalidInputError } from './errors.ts';
 import { recordClass } from './record.ts';
 import { recurrenceFrom, type Recurrence } from './recurrence.ts';
@@ -32,12 +33,9 @@ export interface Occurrence {
 }
 
 /** 新しいスケジュールに要るもの（作る側が決める項目）。 */
-export type NewSchedule = Pick<
+export type CreateScheduleInput = Pick<
   ScheduleData, 'id' | 'tag' | 'requiredSec' | 'dollars' | 'repeat' | 'startMinutes' | 'dueMinutes' | 'cancelMinutes' | 'timeZone'
 > & { now: number; project: TogglProject | null };
-
-/** 「まだセッションを作っていない最初の回」を表す項目。 */
-type NextFields = Pick<ScheduleData, 'nextDate' | 'nextCreateAt'>;
 
 /** 締切の時刻が開始の時刻以前なら、翌日の締切とする。開始から締切までの分。 */
 export function windowMinutes({ startMinutes, dueMinutes }: Pick<ScheduleData, 'startMinutes' | 'dueMinutes'>): number {
@@ -45,7 +43,7 @@ export function windowMinutes({ startMinutes, dueMinutes }: Pick<ScheduleData, '
 }
 
 /** 回の中身が正しくなければ InvalidInputError を投げる。Recurrence にした repeat を返す。 */
-function validate(data: Omit<NewSchedule, 'id' | 'now' | 'project'>): Recurrence {
+function validate(data: Omit<CreateScheduleInput, 'id' | 'now' | 'project'>): Recurrence {
   const { requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone } = data;
   // 曜日や日付の確かめ方は、繰り返しの各クラスに任せる
   const recurrence = recurrenceFrom(repeat);
@@ -70,7 +68,7 @@ export class Schedule extends recordClass<ScheduleData>() {
    * 新しいスケジュール。中身が正しくなければ InvalidInputError を投げる（Functions と入力欄が同じものを使う）。
    * 最初の回は、now の時点でまだ取り消せるもの（作ってすぐ逃げられない回にはしない）。
    */
-  static create({ id, now, project, ...fields }: NewSchedule): Schedule {
+  static create({ id, now, project, ...fields }: CreateScheduleInput): Schedule {
     const recurrence = validate(fields);
     const schedule = new Schedule({
       id,
@@ -92,7 +90,7 @@ export class Schedule extends recordClass<ScheduleData>() {
       }
     }
     if (!first) throw new InvalidInputError('この繰り返しでは、回が1つもありません');
-    Object.assign(schedule, schedule.nextFieldsFor(first));
+    Object.assign(schedule, schedule.nextOccurrenceFields(first));
     return schedule;
   }
 
@@ -146,7 +144,7 @@ export class Schedule extends recordClass<ScheduleData>() {
   }
 
   /** occurrence を「まだセッションを作っていない最初の回」にするときに保存する項目。null なら回がもう無い。 */
-  nextFieldsFor(occurrence: Occurrence | null): NextFields {
+  nextOccurrenceFields(occurrence: Occurrence | null): Pick<ScheduleData, 'nextDate' | 'nextCreateAt'> {
     return {
       nextDate: occurrence?.date ?? null,
       nextCreateAt: occurrence ? this.creationTime(occurrence) : null,
@@ -183,23 +181,5 @@ export class Schedule extends recordClass<ScheduleData>() {
       scheduleId: this.id,
       cancelableUntil: occurrence.cancelableUntil,
     });
-  }
-
-  // ---- 表示用 ----
-
-  /** 「9:00〜18:00」「22:00〜翌1:00」の形。 */
-  get timeRangeLabel(): string {
-    const next = this.dueMinutes <= this.startMinutes ? '翌' : '';
-    return `${minuteOfDayLabel(this.startMinutes)}〜${next}${minuteOfDayLabel(this.dueMinutes)}`;
-  }
-
-  /** 「毎週 月水金 9:00〜18:00 に 2時間00分」の形。 */
-  get summary(): string {
-    return `${this.recurrence.label} ${this.timeRangeLabel} に ${formatDuration(this.requiredSec)}`;
-  }
-
-  /** 「カウント開始の1時間00分前まで取り消せます」の形。 */
-  get cancelLabel(): string {
-    return cancelLabel(this.cancelMinutes);
   }
 }

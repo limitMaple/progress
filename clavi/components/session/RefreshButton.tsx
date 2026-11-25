@@ -1,29 +1,23 @@
 "use client";
 
 import { syncNow } from "@/lib/firebase";
-import type { PanelProps } from "@/components/session/common";
+import type { Session } from "@/functions/src/session";
+import { useActivity } from "@/components/session/activity";
 
 /** セッションの一覧の「↻ 更新」。Toggl の記録で進捗を取り直す（達していればその場で達成になる）。 */
-export default function RefreshButton({ sessions, setBusy, setMessage, disabled }: PanelProps) {
-    async function refresh() {
-        if (disabled) return;
+export default function RefreshButton({ sessions, disabled }: { sessions: Session[]; disabled: boolean }) {
+    const { busy, run, notify } = useActivity();
+
+    function refresh() {
         if (!sessions.some((s) => s.status === "active")) {
-            setMessage({ text: "進行中のセッションはありません", kind: "" });
+            notify({ text: "進行中のセッションはありません", kind: "" });
             return;
         }
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
-            const result = await syncNow();
-            if (result.done.length) {
-                setMessage({ text: `達成しました: ${result.done.join("、")}`, kind: "ok" });
-            }
-        } catch (err) {
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
+        void run(async () => {
+            const { done } = await syncNow();
+            if (done.length) return { text: `達成しました: ${done.join("、")}`, kind: "ok" };
+        });
     }
 
-    return <button type="button" onClick={refresh} disabled={disabled}>↻ 更新</button>;
+    return <button type="button" onClick={refresh} disabled={busy || disabled}>↻ 更新</button>;
 }

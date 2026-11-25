@@ -55,28 +55,41 @@ Chrome 拡張版を Firebase に移したものです。拡張版と違い、締
 
 - `app/`, `components/` … 画面（Next.js の静的書き出し、Firebase Hosting に置く）
   - ログインとログアウトは `components/AuthGate.tsx` だけで扱い、`app/layout.tsx` で全ページを包む
-  - `components/Home.tsx` … ログイン後の画面。どのタブも「一覧」と「新しい〜」でできているので、中身は `Panel` が描き、
-    タブごとに違うところ（一覧に出すもの・1 件の部品・入力欄）だけを `TABS` に持つ。タブを足すときはここに 1 つ足す
+  - `components/Home.tsx` … ログイン後の画面。データを読み、タブを切り替えるだけ。
+    タブの中身は `session/SessionsTab.tsx` と `session/SchedulesTab.tsx` が描く（どちらも `TabProps` を受け取る）。
+    タブを足すときは、その部品を書いて `TABS` に 1 つ足す
   - どちらのタブも描いたままにして（開いていない方は hidden）、タブを行き来しても入力中の値を消さない
-  - データの読み込みと「何かの処理中か」は `Home.tsx` が持ち、`PanelProps`（`session/common.ts`）で中身に渡す
+  - 操作の「処理中」と「知らせ」は `session/activity.ts` の `Activity` にまとめ、Home が持って context で渡す。
+    部品は `useActivity().run(...)` で操作を走らせる（処理中の印・知らせ・例外の表示を各部品で書かない）
+  - 一覧の見出しと並びは `session/ItemList.tsx`。一覧から消すのは `lib/account.ts` の `deleteSession` / `deleteSchedule`
   - `components/session/fields.tsx` … 2 つの入力欄で同じ欄（プロジェクト・タグ・作業時間・金額）と、値の持ち方（`useFormValues`）
+  - `components/session/types.ts` … 部品どうしで渡す props の形。`useNow.ts` … 残り時間の表示を進める
 - `lib/` … 画面側の Firebase への接続、画面から呼ぶ関数の定義、データの読み込み
 - `functions/` … Cloud Functions（TypeScript。`tsc` で `lib/` に書き出し、デプロイ前に自動でビルドされる）
-  - `index.ts` … 画面から呼ぶ関数（設定の保存・開始・取り消し・更新・精算・スケジュールの作成）と、1分おきの自動精算・スケジュールからのセッション作成
-  - `src/model.ts` … Firestore のデータの形と、画面から呼ぶ関数の引数・戻り値。画面側もここを import する
-  - `src/api.ts` … Toggl / Beeminder の薄いクライアント
-  - `src/progress.ts` … 進捗計算と表示の純粋関数（拡張版から流用。画面側も使う）
-  - `src/sync.ts` … Toggl の記録で進捗を更新する
-  - `src/settle.ts` … 締切後の精算（課金するのはここだけ）
-  - `src/session.ts` … セッション（`Session` クラス）。状態の移り変わりと表示用の計算。画面側も使う
-  - `src/recurrence.ts` … 繰り返しのきまり。`Recurrence` インターフェースと、日・週・月ごとの実装クラス。画面側も使う
-  - `src/schedule.ts` … スケジュール（`Schedule` クラス）。各回の時刻・締切・取り消せる期限と、いつセッションを作るか。画面側も使う
-  - `src/cancel.ts` … 取り消し猶予の決まり（取り消せる期限の計算・使える値・表示の文）。画面側も使う
-  - `src/errors.ts` … 入力の誤り（`InvalidInputError`）。`Schedule.create` と `validateSessionTerms` が投げ、
-    Functions は invalid-argument に、画面は入力欄の下の文にする（確かめ方を画面と Functions で 2 回書かない）
-  - `src/calendar.ts` … 日付とタイムゾーンの計算（中身は Temporal のポリフィル `temporal-polyfill`）
-  - `src/generate.ts` … スケジュールから、作る時刻を迎えた回のセッションを作る（トランザクション）
-  - `src/store.ts` … Firestore の読み書きと、二重課金を防ぐロック
+  - `index.ts` … 入り口。ログインの確認・画面から来た値を型にそろえる・`src/` の処理を呼ぶ・エラーを画面向けにする、だけを持つ
+  - データの形（画面側も import する）
+    - `src/model.ts` … Firestore に置くデータの形
+    - `src/requests.ts` … 画面から呼ぶ関数の引数・戻り値
+  - 決まり（Node に依存せず、画面側も使う）
+    - `src/session.ts` … セッション（`Session` クラス）の状態と、状態の移り変わり
+    - `src/schedule.ts` … スケジュール（`Schedule` クラス）。各回の時刻・締切・取り消せる期限と、いつセッションを作るか
+    - `src/recurrence.ts` … 繰り返しのきまり。`Recurrence` インターフェースと、日・週・月ごとの実装クラス
+    - `src/cancel.ts` … 取り消し猶予の決まり（取り消せる期限の計算・使える値・表示の文）
+    - `src/progress.ts` … Toggl の記録から、数えた秒数を出す
+    - `src/errors.ts` … 入力の誤り（`InvalidInputError`）と、画面での受け取り方（`checkInput`）。
+      `Schedule.create` と `validateStartSessionInput` が投げ、Functions は invalid-argument に、画面は入力欄の下の文にする
+    - `src/calendar.ts` … 日付とタイムゾーンの計算（中身は Temporal のポリフィル `temporal-polyfill`）
+  - 表示（画面側が使う）
+    - `src/format.ts` … 時間・日付・セッションの名前・数える記録の文字列
+    - `src/sessionView.ts` / `src/scheduleView.ts` … セッションとスケジュールを画面に出す形にする
+  - 処理（Functions だけが使う）
+    - `src/settings.ts` … 設定の保存と、Toggl / Beeminder への接続の確認
+    - `src/create.ts` … セッションを始める・スケジュールを作る
+    - `src/sync.ts` … Toggl の記録で進捗を更新する
+    - `src/settle.ts` … 締切後の精算（課金するのはここだけ）
+    - `src/generate.ts` … スケジュールから、作る時刻を迎えた回のセッションを作る（トランザクション）
+    - `src/store.ts` … Firestore の読み書きと、二重課金を防ぐロック
+    - `src/api.ts` … Toggl / Beeminder の薄いクライアント
 - Firestore
   - `users/{uid}` … 設定（本人も読める）
   - `secrets/{uid}` … API トークン（Functions からしか読めない）

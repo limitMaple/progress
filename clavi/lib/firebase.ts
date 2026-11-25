@@ -3,9 +3,8 @@ import { getAuth, GoogleAuthProvider, connectAuthEmulator } from "firebase/auth"
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import type {
-    CancelSessionRequest, CreateScheduleRequest, CreateScheduleResponse, SaveSettingsRequest, SaveSettingsResponse,
-    SettleNowRequest, SettleResult, StartSessionRequest, StartSessionResponse, SyncNowResponse,
-} from "@/functions/src/model";
+  CancelSessionRequest, CreateScheduleRequest, CreateScheduleResponse, SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult, StartSessionRequest, StartSessionResponse, SyncNowResponse,
+} from "@/functions/src/requests";
 
 // 設定値はコードに書かず、ビルド時の環境変数から読む。
 // 手元は clavi/.env.local（git には入れない。項目は .env.example）、CI は GitHub の Secrets から渡す。

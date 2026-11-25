@@ -1,11 +1,14 @@
 "use client";
 
-import { deleteDoc, doc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { formatDay, formatDeadline, formatDuration, sessionTitle } from "@/functions/src/progress";
+import { deleteSchedule } from "@/lib/account";
+import { formatDay, formatDeadline, formatDuration, sessionTitle } from "@/functions/src/format";
 import { dateLabel } from "@/functions/src/calendar";
 import type { Schedule } from "@/functions/src/schedule";
-import { targetLabel, type ItemProps } from "@/components/session/common";
+import { timeRangeLabel } from "@/functions/src/scheduleView";
+import { cancelLabel } from "@/functions/src/cancel";
+import { targetLabel } from "@/functions/src/format";
+import { type ItemProps } from "@/components/session/types";
+import { useActivity } from "@/components/session/activity";
 
 // 先の回をいくつ見せるか
 const UPCOMING = 3;
@@ -14,21 +17,13 @@ const UPCOMING = 3;
  * スケジュール 1 件と、これからの回。
  * 各回のセッションは取り消せる期限の 1 日前に作られ、「セッション」タブから取り消せる。
  */
-export default function ScheduleItem({ uid, item: schedule, now, busy, setBusy, setMessage }: ItemProps<Schedule>) {
+export default function ScheduleItem({ item: schedule, now }: ItemProps<Schedule>) {
+    const { busy, run } = useActivity();
     const occurrences = schedule.upcoming(now, UPCOMING);
 
-    async function remove() {
-        if (busy) return;
+    function remove() {
         if (!confirm(`スケジュール「${sessionTitle(schedule)}」を消しますか？\nもう作ったセッションは残ります。`)) return;
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
-            await deleteDoc(doc(db, "users", uid, "schedules", schedule.id));
-        } catch (err) {
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
+        void run(() => deleteSchedule(schedule.id));
     }
 
     return (
@@ -38,7 +33,7 @@ export default function ScheduleItem({ uid, item: schedule, now, busy, setBusy, 
                 <span className="badge schedule">{schedule.recurrence.label}</span>
             </div>
             <div className="deadline muted">
-                {`${schedule.timeRangeLabel} ・ $${schedule.dollars} ・ ${targetLabel(schedule)}`}
+                {`${timeRangeLabel(schedule)} ・ $${schedule.dollars} ・ ${targetLabel(schedule)}`}
             </div>
             {schedule.message && <div className="auto-check">{schedule.message}</div>}
             <ul className="occurrences">
@@ -59,7 +54,7 @@ export default function ScheduleItem({ uid, item: schedule, now, busy, setBusy, 
             </ul>
             {occurrences.length === 0 && <p className="muted">これからの回はありません</p>}
             <div className="session-foot">
-                <span className="updated muted">{`${schedule.cancelLabel}（「セッション」タブから）`}</span>
+                <span className="updated muted">{`${cancelLabel(schedule.cancelMinutes)}（「セッション」タブから）`}</span>
                 <button type="button" className="link" onClick={remove} disabled={busy}>スケジュールを消す</button>
             </div>
         </li>

@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { sessionTitle, formatClock, formatDate, formatDuration, formatDay } from "@/functions/src/progress";
-import { targetLabel } from "@/components/session/common";
-import type { Draft } from "@/components/session/NewSessionForm";
+import { sessionTitle, formatClock, formatDate, formatDuration, formatDay } from "@/functions/src/format";
+import { targetLabel } from "@/functions/src/format";
+import type { StartConfirmation } from "@/components/session/NewSessionForm";
 
 /**
  * 開始前の確認画面。開始したあとは内容を変えられないので、締切とカウント開始を
  * 取り違えていないか（日付を 1 日ずらしていないか、など）をここで大きく見せる。
  */
 export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
-    draft: Draft;
+    draft: StartConfirmation;
     busy: boolean;
     onBack: () => void;
     onStart: () => void;

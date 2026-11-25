@@ -72,3 +72,16 @@ export function zonedTime(date: string, minutes: number, timeZone: string): numb
     .toZonedDateTime({ timeZone, plainTime })
     .epochMilliseconds;
 }
+
+/**
+ * 日付 "YYYY-MM-DD" と時刻 "HH:MM" を時刻（ms）にする。時刻が空ならその日の 0:00。
+ * 日付が空、または形が正しくなければ null。
+ * 実行環境のタイムゾーンで解釈するので、ブラウザで呼ぶこと（Functions は UTC で動く）。
+ */
+export function localDateTime(date: string, time: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (time && !/^\d{2}:\d{2}$/.test(time)) return null;
+  // 時差の無い "YYYY-MM-DDTHH:MM" は、実行環境のタイムゾーンの時刻として解釈される
+  const ms = new Date(`${date}T${time || '00:00'}`).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}

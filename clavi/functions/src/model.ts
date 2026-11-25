@@ -1,4 +1,4 @@
-// Firestore に置くデータの形と、画面から呼ぶ関数の引数・戻り値。
+// Firestore に置くデータの形（画面から呼ぶ関数の引数・戻り値は requests.ts）。
 // Web アプリ（clavi/lib, components）もここを import するので、Node や firebase-admin に依存しないこと。
 //
 //   users/{uid}                … Settings（本人も読める）
@@ -156,87 +156,5 @@ export interface ScheduleData {
   /** その回のセッションを作る時刻。定期実行はこれを見て探す */
   nextCreateAt: number | null;
   /** 最後にセッションを作れなかった理由。作れたら空 */
-  message: string;
-}
-
-/** Toggl の time entry のうち、進捗の計算に使う部分。 */
-export interface TimeEntry {
-  start: string;
-  stop: string | null;
-  /** 計測中は負の値 */
-  duration: number;
-  project_id: number | null;
-  tags: string[] | null;
-}
-
-// ---- 画面から呼ぶ関数（Cloud Functions の callable） ----
-
-export interface SaveSettingsRequest {
-  /** 空欄なら変更しない */
-  togglToken: string;
-  /** 空欄なら変更しない */
-  beeminderToken: string;
-  /** 取り消し猶予（分）。null なら変更しない */
-  cancelMinutes: number | null;
-}
-
-export interface SaveSettingsResponse {
-  ok: boolean;
-  message: string;
-}
-
-export interface StartSessionRequest {
-  projectId: number | null;
-  tag: string;
-  requiredSec: number;
-  /** 数え始める時刻。null なら開始した時刻から */
-  startAt: number | null;
-  due: number;
-  dollars: number;
-}
-
-export interface CreateScheduleRequest {
-  projectId: number | null;
-  tag: string;
-  requiredSec: number;
-  dollars: number;
-  repeat: RecurrenceData;
-  startMinutes: number;
-  dueMinutes: number;
-  timeZone: string;
-}
-
-export interface CreateScheduleResponse {
-  id: string;
-}
-
-/** セッションを取り消す。取り消せる期限より前だけ。 */
-export interface CancelSessionRequest {
-  id: string;
-}
-
-export interface StartSessionResponse {
-  id: string;
-}
-
-export interface SyncNowResponse {
-  /** 達成になったセッションのタイトル */
-  done: string[];
-}
-
-/**
- * 課金されたか分からないセッションへの人の判断。
- *   charged     … Beeminder の履歴に課金があった。課金せずに課金済みにする
- *   not_charged … 履歴に課金がなかった。印を消してもう一度精算する
- */
-export type ChargeResolution = 'charged' | 'not_charged';
-
-export interface SettleNowRequest {
-  id: string;
-  resolve?: ChargeResolution;
-}
-
-export interface SettleResult {
-  status: SessionStatus;
   message: string;
 }

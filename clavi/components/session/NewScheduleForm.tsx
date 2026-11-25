@@ -3,12 +3,17 @@
 import { type FormEvent } from "react";
 import Link from "next/link";
 import { createSchedule } from "@/lib/firebase";
-import { sessionTitle } from "@/functions/src/progress";
+import { sessionTitle } from "@/functions/src/format";
 import { dateLabel, parseClock, zonedDate } from "@/functions/src/calendar";
 import { cancelLabel } from "@/functions/src/cancel";
 import { Schedule } from "@/functions/src/schedule";
-import type { CreateScheduleRequest, RecurrenceData } from "@/functions/src/model";
-import { checkInput, targetLabel, type FormProps } from "@/components/session/common";
+import { scheduleSummary } from "@/functions/src/scheduleView";
+import type { CreateScheduleRequest } from "@/functions/src/requests";
+import type { RecurrenceData } from "@/functions/src/model";
+import { checkInput } from "@/functions/src/errors";
+import { type FormProps } from "@/components/session/types";
+import { targetLabel } from "@/functions/src/format";
+import { useActivity } from "@/components/session/activity";
 import RecurrenceFields, { RECURRENCE_EDITORS } from "@/components/session/RecurrenceFields";
 import {
     DollarsField, DurationField, ProjectField, SubmitRow, TagField,
@@ -49,10 +54,11 @@ function initialValues(requiredSec: number): FormValues {
  * 新しいスケジュールの入力欄。各回のセッションは、取り消せる期限の 1 日前に作られる。
  * 取り消し猶予はここでは決めず、設定の値（cancelMinutes）に従う。
  */
-export default function NewScheduleForm(
-    { initialRequiredSec, projects, tags, cancelMinutes, now, disabled, setBusy, setMessage }: FormProps,
-) {
-    const { values, setValues, change } = useFormValues(() => initialValues(initialRequiredSec));
+export default function NewScheduleForm({ settings, now, canCommit }: FormProps) {
+    const { projects, tags, cancelMinutes } = settings;
+    const { busy, run } = useActivity();
+    const disabled = busy || !canCommit;
+    const { values, setValues, change } = useFormValues(() => initialValues(settings.lastRequiredSec));
 
     const form = readForm(now);
 
@@ -77,39 +83,33 @@ export default function NewScheduleForm(
         return { request, schedule, error };
     }
 
-    async function submit(event: FormEvent) {
+    function submit(event: FormEvent) {
         event.preventDefault();
         const { error, request, schedule } = readForm(Date.now());
         if (disabled || error || !schedule) return;
         if (!confirm(
             `${sessionTitle(schedule)}\n`
-            + `${schedule.summary}、${targetLabel(schedule)}を数えます。\n`
+            + `${scheduleSummary(schedule)}、${targetLabel(schedule)}を数えます。\n`
             + `届かなければ毎回 $${request.dollars} が課金されます。\n`
             + `最初の回は ${dateLabel(schedule.nextDate!)} です。\n\n`
-            + `各回のセッションは、取り消せる期限の1日前に作られます。${schedule.cancelLabel}。\n`
+            + `各回のセッションは、取り消せる期限の1日前に作られます。${cancelLabel(schedule.cancelMinutes)}。\n`
             + "このスケジュールを作りますか？",
         )) return;
 
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
+        void run(async () => {
             await createSchedule(request);
             // 次のスケジュールのために、同じ種類の初めの値に戻す（起点と間隔はそのまま）
             setValues((v) => ({
                 ...v,
                 repeat: RECURRENCE_EDITORS[v.repeat.kind].initial({ from: v.repeat.from, interval: v.repeat.interval }),
             }));
-            setMessage({ text: "スケジュールを作りました。各回のセッションは、取り消せる期限の1日前に作られます。", kind: "ok" });
-        } catch (err) {
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
+            return { text: "スケジュールを作りました。各回のセッションは、取り消せる期限の1日前に作られます。", kind: "ok" };
+        });
     }
 
     const hint = form.schedule
-        ? `${form.schedule.summary}（${targetLabel(form.schedule)}）。`
-            + `最初の回は ${dateLabel(form.schedule.nextDate!)}。${form.schedule.cancelLabel}`
+        ? `${scheduleSummary(form.schedule)}（${targetLabel(form.schedule)}）。`
+            + `最初の回は ${dateLabel(form.schedule.nextDate!)}。${cancelLabel(form.schedule.cancelMinutes)}`
         : form.error;
 
     return (

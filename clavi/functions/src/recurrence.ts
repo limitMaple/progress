@@ -92,11 +92,16 @@ export class WeeklyRecurrence implements Recurrence {
     return null;
   }
 
+  /** 「毎週 月水金」「平日」「2週間ごと 土日」の形。 */
   get label(): string {
-    const days = weekdaysLabel(this.weekdays);
+    const key = this.weekdays.join();
+    // 「毎日」「平日」「土日」はそれだけで分かる（2週間ごとなどなら前に間隔を付ける）
+    const named = this.weekdays.length === 7 ? '毎日' : key === '1,2,3,4,5' ? '平日' : key === '0,6' ? '土日' : null;
+    // 月曜から並べる（日曜は最後）
+    const days = named ?? [...this.weekdays.filter((d) => d > 0), ...this.weekdays.filter((d) => d === 0)]
+      .map((d) => WEEKDAYS[d]).join('');
     if (this.interval > 1) return `${this.interval}週間ごと ${days}`;
-    // 「毎日」「平日」「土日」はそれだけで分かる
-    return ['毎日', '平日', '土日'].includes(days) ? days : `毎週 ${days}`;
+    return named ?? `毎週 ${days}`;
   }
 
   toData(): RecurrenceData {
@@ -211,14 +216,4 @@ export function recurrenceFrom(data: RecurrenceData): Recurrence {
   if (!Object.hasOwn(RECURRENCES, kind)) throw new InvalidInputError('繰り返しの種類が正しくありません');
   const Recurrence = RECURRENCES[kind] as new (data: RecurrenceData) => Recurrence;
   return new Recurrence(data);
-}
-
-/** 「毎日」「平日」「土日」「月水金」の形。 */
-export function weekdaysLabel(weekdays: readonly number[]): string {
-  const days = [...new Set(weekdays)].sort((a, b) => a - b);
-  if (days.length === 7) return '毎日';
-  if (days.join() === '1,2,3,4,5') return '平日';
-  if (days.join() === '0,6') return '土日';
-  // 月曜から並べる
-  return [...days.filter((d) => d > 0), ...days.filter((d) => d === 0)].map((d) => WEEKDAYS[d]).join('');
 }
