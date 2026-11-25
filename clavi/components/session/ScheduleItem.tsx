@@ -12,7 +12,7 @@ const UPCOMING = 3;
 
 /**
  * スケジュール 1 件と、これからの回。
- * 各回のセッションは取り消せる期限の 1 日前に作られ、セッションの一覧から取り消せる。
+ * 各回のセッションは取り消せる期限の 1 日前に作られ、「セッション」タブから取り消せる。
  */
 export default function ScheduleItem({ uid, schedule, now, setMessage }: {
     uid: string;
@@ -61,7 +61,7 @@ export default function ScheduleItem({ uid, schedule, now, setMessage }: {
             </ul>
             {occurrences.length === 0 && <p className="muted">これからの回はありません</p>}
             <div className="session-foot">
-                <span className="updated muted">{`${schedule.cancelLabel}（セッションの一覧から）`}</span>
+                <span className="updated muted">{`${schedule.cancelLabel}（「セッション」タブから）`}</span>
                 <button type="button" className="link" onClick={remove}>スケジュールを消す</button>
             </div>
         </li>

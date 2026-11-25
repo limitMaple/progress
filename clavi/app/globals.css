@@ -115,6 +115,38 @@ a { color: var(--accent); }
 }
 .section-head h2 { margin: 0; }
 
+/* ---- タブ ---- */
+
+/* セッションとスケジュールの切り替え。中身の見出しと続けて読めるよう、下線だけのタブにする */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* いま抱えているものの数（進行中のセッション・スケジュールの件数） */
+.tab .count {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tab.on .count { background: var(--accent); color: var(--accent-text); }
+
 /* ---- ログイン ---- */
 
 .login {
@@ -219,8 +251,6 @@ input.num { width: 64px; }
 }
 .occurrences li.skipped > span:first-child { text-decoration: line-through; color: var(--muted); }
 
-.schedule-form-wrap summary { cursor: pointer; margin: 20px 0 8px; color: var(--muted); }
-.schedule-form-wrap summary h2 { display: inline; margin: 0; }
 
 /* 曜日のトグル。チェックボックスは隠して、押せる丸として見せる */
 .session-form .field {
