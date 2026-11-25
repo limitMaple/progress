@@ -1,5 +1,5 @@
-import Sessions from "@/components/Sessions";
+import Home from "@/components/Home";
 
 export default function HomePage() {
-    return <Sessions />;
+    return <Home />;
 }

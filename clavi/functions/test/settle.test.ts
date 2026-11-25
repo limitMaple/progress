@@ -8,7 +8,8 @@ import { settleSession, settleManually } from '../src/settle.ts';
 import { syncSessions } from '../src/sync.ts';
 import { claimSettlement, sessionsRef, userRef, secretRef, ConflictError } from '../src/store.ts';
 import { Session } from '../src/session.ts';
-import type { SessionData, TimeEntry } from '../src/model.ts';
+import type { SessionData } from '../src/model.ts';
+import type { TimeEntry } from '../src/api.ts';
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
   throw new Error('Firestore エミュレーターの中で動かしてください（clavi で npm test）');
@@ -319,9 +320,9 @@ test('締切前の同期では、達していれば done にする', async () =>
   const { uid, session } = await setup({ due: Date.now() + HOUR, checkAt: Date.now() + HOUR });
   togglEntries = [entry(session.createdAt, 70)];
 
-  const result = await syncSessions(uid);
+  const done = await syncSessions(uid);
 
-  assert.equal(result.done.length, 1);
+  assert.equal(done.length, 1);
   const saved = await read(uid, session.id);
   assert.equal(saved.status, 'done');
   assert.equal(saved.checkAt, null);

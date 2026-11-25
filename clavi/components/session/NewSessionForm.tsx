@@ -1,15 +1,32 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { startSession } from "@/lib/firebase";
-import { localDateTime, formatDuration, formatDay, formatDeadline } from "@/functions/src/progress";
-import { MAX_START_PAST_MS } from "@/functions/src/model";
-import type { StartSessionRequest, TogglProject } from "@/functions/src/model";
-import { useNow, targetLabel, type Message } from "@/components/session/common";
+import { localDateTime } from "@/functions/src/calendar";
+import { formatDuration, formatDay, formatDeadline } from "@/functions/src/format";
+import { cancelableUntilFor, cancelLabel } from "@/functions/src/cancel";
+import { validateStartSessionInput } from "@/functions/src/session";
+import type { StartSessionRequest } from "@/functions/src/requests";
+import { checkInput } from "@/functions/src/errors";
+import { type FormProps } from "@/components/session/types";
+import { targetLabel } from "@/functions/src/format";
+import { useActivity } from "@/components/session/activity";
 import StartConfirmDialog from "@/components/session/StartConfirmDialog";
+import {
+    DollarsField, DurationField, ProjectField, SubmitRow, TagField,
+    dollarsOf, durationValues, requiredSecOf, useFormValues,
+} from "@/components/session/fields";
+
+// 手で作るセッションは日をまたいでもよいので、作業時間は 99 時間まで
+const MAX_HOURS = 99;
 
 /** 確認画面に出す、開始しようとしている内容。 */
-export type Draft = StartSessionRequest & { projectName: string };
+export type StartConfirmation = StartSessionRequest & {
+    projectName: string;
+    /** 取り消せる期限。取り消せないなら null */
+    cancelableUntil: number | null;
+};
 
 /** 入力欄の値。どれも input / select の value なので文字列で持つ（日付は "YYYY-MM-DD"、時刻は "HH:MM"）。 */
 type FormValues = {
@@ -33,65 +50,47 @@ function initialValues(requiredSec: number): FormValues {
         startTime: "",
         deadlineDate: "",
         deadlineTime: "",
-        hours: String(Math.floor(requiredSec / 3600)),
-        minutes: String(Math.floor((requiredSec % 3600) / 60)),
+        ...durationValues(requiredSec),
         dollars: "0",
     };
 }
 
 /**
- * 新しいセッションの入力欄。
- * initialRequiredSec は作るときに 1 回だけ使う（あとで設定が変わっても、入力中の値は上書きしない）。
- * projects と tags は選択肢なので、設定が変われば追従する。
+ * 新しいセッションの入力欄。開始する前に確認画面（StartConfirmDialog）を出す。
+ * 取り消し猶予はここでは決めず、設定の値（cancelMinutes）に従う。
  */
-export default function NewSessionForm({ initialRequiredSec, projects, tags, disabled, setBusy, setMessage }: {
-    initialRequiredSec: number;
-    projects: TogglProject[];
-    tags: string[];
-    disabled: boolean;
-    setBusy: (busy: boolean) => void;
-    setMessage: (message: Message) => void;
-}) {
-    const [values, setValues] = useState(() => initialValues(initialRequiredSec));
-    const [draft, setDraft] = useState<Draft | null>(null);
-    // 残り時間の表示を進めるためだけに、30 秒ごとに描き直す
-    useNow();
+export default function NewSessionForm({ settings, now, canCommit }: FormProps) {
+    const { projects, tags, cancelMinutes } = settings;
+    const { busy, run, notify } = useActivity();
+    const disabled = busy || !canCommit;
+    const { values, change } = useFormValues(() => initialValues(settings.lastRequiredSec));
+    const [draft, setDraft] = useState<StartConfirmation | null>(null);
 
-    const change = (key: keyof FormValues) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { value } = e.target;
-        setValues((v) => ({ ...v, [key]: value }));
-    };
+    const form = readForm(now);
 
-    const form = readForm();
-
-    function readForm() {
-        const now = Date.now();
+    function readForm(now: number) {
         const project = projects.find((p) => String(p.id) === values.projectId) ?? null;
-        const requiredSec = (Number(values.hours) || 0) * 3600 + (Number(values.minutes) || 0) * 60;
-        const amount = Math.floor(Number(values.dollars) || 0);
+        const requiredSec = requiredSecOf(values);
+        const dollars = dollarsOf(values);
         // カウント開始は空欄なら null（開始した時刻から数える）。日付だけならその日の 0:00
         const startAt = values.startDate ? localDateTime(values.startDate, values.startTime) : null;
         const due = values.deadlineTime ? localDateTime(values.deadlineDate, values.deadlineTime) : null;
-        const countFrom = startAt ?? now;
+        const fields = {
+            now, project, tag: values.tag.trim(), requiredSec, dollars, startAt, due,
+            cancelableUntil: cancelableUntilFor(startAt, cancelMinutes, now),
+        };
 
-        let error = "";
-        if (values.startTime && !values.startDate) error = "カウント開始の日付を入力してください";
-        else if (!due) error = "締切の日付と時刻を入力してください";
-        else if (due <= now) error = "締切が過ぎています";
-        else if (startAt != null && startAt < now - MAX_START_PAST_MS) error = "カウント開始は30日前までにしてください";
-        else if (requiredSec <= 0) error = "作業時間を入力してください";
-        else if (amount < 1) error = "金額は$1以上にしてください";
-        else if (due - countFrom < requiredSec * 1000) {
-            error = `カウント開始から締切まで${formatDuration((due - countFrom) / 1000)}しかありません`;
-        }
-        return { now, project, tag: values.tag.trim(), requiredSec, dollars: amount, startAt, due, error };
+        // 入力欄の形の誤りを先に見て、中身は Functions と同じもので確かめる
+        if (values.startTime && !values.startDate) return { ...fields, error: "カウント開始の日付を入力してください" };
+        if (due == null) return { ...fields, error: "締切の日付と時刻を入力してください" };
+        return { ...fields, error: checkInput(() => validateStartSessionInput({ requiredSec, startAt, due, dollars }, now)).error };
     }
 
     /** 開始ボタン。すぐには始めず、確認画面を開く。 */
     function review(event: FormEvent) {
         event.preventDefault();
-        const form = readForm();
-        if (disabled || form.error || !form.due) return;
+        const form = readForm(Date.now());
+        if (disabled || form.error || form.due == null) return;
         setDraft({
             projectId: form.project?.id ?? null,
             projectName: form.project?.name ?? "",
@@ -100,39 +99,37 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
             startAt: form.startAt,
             due: form.due,
             dollars: form.dollars,
+            cancelableUntil: form.cancelableUntil,
         });
     }
 
-    async function start(draft: Draft) {
+    function start(draft: StartConfirmation) {
         // 確認画面を開いたまま時間が経つと、作業時間が締切に収まらなくなることがある
-        const now = Date.now();
-        if (draft.due <= now || draft.due - (draft.startAt ?? now) < draft.requiredSec * 1000) {
+        const { error } = checkInput(() => validateStartSessionInput(draft, Date.now()));
+        if (error) {
             setDraft(null);
-            setMessage({ text: "確認している間に、締切までに作業時間が収まらなくなりました。直してください。", kind: "error" });
+            notify({ text: `確認している間に時間が経ちました。直してください: ${error}`, kind: "error" });
             return;
         }
-        setBusy(true);
-        setMessage({ text: "", kind: "" });
-        try {
-            await startSession({
-                projectId: draft.projectId,
-                tag: draft.tag,
-                requiredSec: draft.requiredSec,
-                startAt: draft.startAt,
-                due: draft.due,
-                dollars: draft.dollars,
-            });
-            setDraft(null);
-            setMessage({ text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" });
-        } catch (err) {
-            setDraft(null);
-            setMessage({ text: (err as Error).message, kind: "error" });
-        } finally {
-            setBusy(false);
-        }
+        // 確認画面は、終わるまで（「開始しています…」を出して）開いたままにする
+        void run(async () => {
+            try {
+                await startSession({
+                    projectId: draft.projectId,
+                    tag: draft.tag,
+                    requiredSec: draft.requiredSec,
+                    startAt: draft.startAt,
+                    due: draft.due,
+                    dollars: draft.dollars,
+                });
+                return { text: "セッションを開始しました。Togglのタイマーを始めてください。", kind: "ok" };
+            } finally {
+                setDraft(null);
+            }
+        });
     }
 
-    const hint = form.error || !form.due
+    const hint = form.error || form.due == null
         ? form.error
         : `${form.startAt == null ? "開始した時刻" : formatDeadline(form.startAt, form.now)}から`
             + `締切 ${formatDeadline(form.due, form.now)}（残り${formatDuration((form.due - form.now) / 1000)}）までに`
@@ -142,27 +139,8 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
         <section>
             <h2>新しいセッション</h2>
             <form className="session-form" onSubmit={review} noValidate>
-                <label>
-                    <span>プロジェクト</span>
-                    <select value={values.projectId} onChange={change("projectId")}>
-                        <option value="">指定なし</option>
-                        {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-                    </select>
-                </label>
-
-                <label>
-                    <span>タグ</span>
-                    <input
-                        list="tag-options"
-                        placeholder="空欄ならタグで絞らない"
-                        autoComplete="off"
-                        value={values.tag}
-                        onChange={change("tag")}
-                    />
-                </label>
-                <datalist id="tag-options">
-                    {tags.map((name) => <option key={name} value={name} />)}
-                </datalist>
+                <ProjectField values={values} change={change} projects={projects} />
+                <TagField values={values} change={change} tags={tags} />
 
                 <label>
                     <span>カウント開始</span>
@@ -171,7 +149,11 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
                         <input type="time" value={values.startTime} onChange={change("startTime")} />
                     </span>
                 </label>
-                <p className="field-note muted">空欄なら開始した時刻から数えます。日付だけなら、その日の 0:00 から。</p>
+                <p className="field-note muted">
+                    空欄なら開始した時刻から数えます。日付だけなら、その日の 0:00 から。
+                    {` ${cancelLabel(cancelMinutes)}`}（<Link href="/settings">設定</Link>で変えられます）。
+                    空欄のときと、期限がもう過ぎているときは取り消せません。
+                </p>
 
                 <label>
                     <span>締切</span>
@@ -182,34 +164,10 @@ export default function NewSessionForm({ initialRequiredSec, projects, tags, dis
                     </span>
                 </label>
 
-                <label>
-                    <span>作業時間</span>
-                    <span className="row">
-                        <input
-                            type="number" min="0" max="99" className="num"
-                            value={values.hours} onChange={change("hours")}
-                        />時間
-                        <input
-                            type="number" min="0" max="59" step="5" className="num"
-                            value={values.minutes} onChange={change("minutes")}
-                        />分
-                    </span>
-                </label>
+                <DurationField values={values} change={change} maxHours={MAX_HOURS} />
+                <DollarsField values={values} change={change} />
 
-                <label>
-                    <span>金額</span>
-                    <span className="row">
-                        $<input
-                            type="number" min="1" step="1" className="num"
-                            value={values.dollars} onChange={change("dollars")}
-                        />
-                    </span>
-                </label>
-
-                <p className={`hint ${form.error ? "error" : ""}`}>{hint}</p>
-                <button type="submit" className="primary" disabled={disabled || Boolean(form.error)}>
-                    内容を確認する
-                </button>
+                <SubmitRow hint={hint} error={form.error} disabled={disabled}>内容を確認する</SubmitRow>
             </form>
 
             {draft && (

@@ -3,12 +3,16 @@
 //
 // 状態を変えるメソッド（「状態の移り変わり」の節）は自身を書き換え、変えた項目を覚えておく。
 // 保存は store.ts の saveChanges で、変わった項目だけを update する（同時に動くほかの処理の書き込みを潰さない）。
-// 画面は表示用のメソッドだけを使い、状態を変えるメソッドは呼ばないこと（React の state を書き換えてしまう）。
+// 画面は状態を調べるメソッド（isSettled, isCancelable など）だけを使い、状態を変えるメソッドは呼ばないこと
+// （React の state を書き換えてしまう）。画面に出す形にするのは sessionView.ts。
 
-import { formatDuration, sessionTitle, trackedSeconds } from './progress.ts';
-import type {
-  ChargeRecord, SessionData, SessionStatus, TimeEntry, TogglProject,
-} from './model.ts';
+import { formatDuration, sessionTitle } from './format.ts';
+import { trackedSeconds } from './progress.ts';
+import { recordClass } from './record.ts';
+import { InvalidInputError } from './errors.ts';
+import { MAX_START_PAST_MS, UNSETTLED_STATUSES } from './model.ts';
+import type { ChargeRecord, SessionData, TogglProject } from './model.ts';
+import type { TimeEntry } from './api.ts';
 
 // 締切ちょうどの記録も拾えるよう、少しだけ待ってから精算する
 const SETTLE_DELAY = 30 * 1000;
@@ -18,16 +22,28 @@ const CLAIM_TTL = 5 * 60 * 1000;
 const RETRY_DELAY = 60 * 1000;
 const MAX_ATTEMPTS = 3;
 
-/** 表示用の状態。settling は「締切を過ぎた active」（精算を待っている）。 */
-export type DisplayStatus = SessionStatus | 'settling';
+/** 手で始めるセッションの、約束の中身。 */
+export interface StartSessionInput {
+  requiredSec: number;
+  /** 数え始める時刻。null なら始めた時刻から */
+  startAt: number | null;
+  due: number;
+  dollars: number;
+}
 
-/** data の項目を、そのままプロパティとして持つクラスの土台（項目を 2 か所に書かないため）。 */
-function recordClass<T extends object>() {
-  return class {
-    constructor(data: T) {
-      Object.assign(this, data);
-    }
-  } as new (data: T) => T;
+/**
+ * 手で始めるセッションの中身が正しいかを確かめ、正しくなければ InvalidInputError を投げる。
+ * Functions（startSession）と入力欄が同じものを使い、確かめ方と文をそろえる。
+ */
+export function validateStartSessionInput({ requiredSec, startAt, due, dollars }: StartSessionInput, now: number): void {
+  const countFrom = startAt ?? now;
+  if (!(due > now)) throw new InvalidInputError('締切が過ぎています');
+  if (!(countFrom >= now - MAX_START_PAST_MS)) throw new InvalidInputError('カウント開始は30日前までにしてください');
+  if (!(requiredSec > 0)) throw new InvalidInputError('作業時間を入力してください');
+  if (!(dollars >= 1)) throw new InvalidInputError('金額は$1以上にしてください');
+  if (!(due - countFrom >= requiredSec * 1000)) {
+    throw new InvalidInputError(`カウント開始から締切まで${formatDuration((due - countFrom) / 1000)}しかありません`);
+  }
 }
 
 export class Session extends recordClass<SessionData>() {
@@ -35,7 +51,7 @@ export class Session extends recordClass<SessionData>() {
   #changes: Partial<SessionData> = {};
 
   /** 新しく始めるセッション。now は作成時刻。 */
-  static start({ id, now, project, tag, requiredSec, startAt, due, dollars }: {
+  static start({ id, now, project, tag, requiredSec, startAt, due, dollars, scheduleId = null, cancelableUntil = null }: {
     id: string;
     now: number;
     project: TogglProject | null;
@@ -44,6 +60,10 @@ export class Session extends recordClass<SessionData>() {
     startAt: number;
     due: number;
     dollars: number;
+    /** スケジュールから作るときだけ */
+    scheduleId?: string | null;
+    /** この時刻より前なら取り消せる。null なら取り消せない */
+    cancelableUntil?: number | null;
   }): Session {
     const projectName = project?.name ?? '';
     return new Session({
@@ -66,6 +86,8 @@ export class Session extends recordClass<SessionData>() {
       claimedAt: null,
       chargeRequestedAt: null,
       measuredSec: null,
+      scheduleId,
+      cancelableUntil,
     });
   }
 
@@ -98,9 +120,14 @@ export class Session extends recordClass<SessionData>() {
     );
   }
 
-  /** 精算が済んでいる（達成か課金済み）。一覧から消せるのはこれだけ。 */
+  /** 精算が済んでいる（達成か課金済み）か、取り消した。一覧から消せるのはこれだけ。 */
   get isSettled(): boolean {
-    return this.status === 'done' || this.status === 'charged';
+    return !UNSETTLED_STATUSES.includes(this.status);
+  }
+
+  /** 取り消せるか。進行中で、取り消せる期限より前だけ。 */
+  isCancelable(now: number): boolean {
+    return this.status === 'active' && this.cancelableUntil != null && now < this.cancelableUntil;
   }
 
   /** 課金 API の途中で失敗して、課金されたか分からない。人が Beeminder の履歴で確かめる */
@@ -114,17 +141,18 @@ export class Session extends recordClass<SessionData>() {
    */
   isClaimable(now: number, { resolving = false } = {}): boolean {
     if (this.charge) return false;
-    if (this.status !== 'active' && this.status !== 'error') return false;
+    if (this.isSettled) return false;
     if (this.chargeRequestedAt && !resolving) return false;
     return !(this.claimedAt && now - this.claimedAt < CLAIM_TTL);
   }
 
-  /** Beeminder の課金に付けるメモ。履歴と突き合わせられるよう、ID の頭を入れておく。 */
-  chargeNote(): string {
-    return `Toggl Ratchet: ${this.title} (${this.id.slice(0, 8)})`;
-  }
-
   // ---- 状態の移り変わり（自身を書き換える。保存は saveChanges） ----
+
+  /** 取り消す。精算も課金もしない。取り消せるかは isCancelable で確かめてから。 */
+  cancel(now: number): void {
+    if (!this.isCancelable(now)) throw new Error('取り消せる期限を過ぎているので、取り消せません');
+    this.change({ status: 'canceled', checkAt: null, updatedAt: now });
+  }
 
   /** 精算に取りかかる（ロックを取る）。取れるかは isClaimable で確かめてから。 */
   claim(now: number): void {
@@ -167,7 +195,7 @@ export class Session extends recordClass<SessionData>() {
   settleAsCharged(trackedSec: number, charge: ChargeRecord): void {
     this.finish(
       'charged',
-      `届きませんでした（${this.progressLabel(trackedSec)}）。$${this.dollars}を課金しました。`,
+      `届きませんでした（${formatDuration(trackedSec)} / ${formatDuration(this.requiredSec)}）。$${this.dollars}を課金しました。`,
       charge,
     );
   }
@@ -240,26 +268,5 @@ export class Session extends recordClass<SessionData>() {
       checkAt: null,
       claimedAt: null,
     });
-  }
-
-  // ---- 表示用 ----
-
-  displayStatus(now: number): DisplayStatus {
-    return this.status === 'active' && now >= this.due ? 'settling' : this.status;
-  }
-
-  /** 作業時間に対する進み具合（0〜1）。 */
-  get progressRatio(): number {
-    return Math.min(1, this.trackedSec / this.requiredSec);
-  }
-
-  /** カウント開始を指定したか（指定しなければ作成時刻と同じ）。 */
-  get hasCustomStart(): boolean {
-    return this.startAt !== this.createdAt;
-  }
-
-  /** 「1時間05分 / 2時間00分」の形。 */
-  progressLabel(trackedSec = this.trackedSec): string {
-    return `${formatDuration(trackedSec)} / ${formatDuration(this.requiredSec)}`;
   }
 }

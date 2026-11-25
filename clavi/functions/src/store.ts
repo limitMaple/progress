@@ -4,9 +4,10 @@ import { getFirestore } from 'firebase-admin/firestore';
 import type {
   DocumentData, DocumentReference, FirestoreDataConverter, Timestamp, WithFieldValue, WriteBatch,
 } from 'firebase-admin/firestore';
-import { DEFAULT_SETTINGS } from './model.ts';
-import type { SessionData, Settings, Tokens } from './model.ts';
+import { DEFAULT_SETTINGS, UNSETTLED_STATUSES } from './model.ts';
+import type { ScheduleData, SessionData, Settings, Tokens } from './model.ts';
 import { Session } from './session.ts';
+import { Schedule } from './schedule.ts';
 
 /** 型を付けるだけの変換。中身は Firestore に置いたそのまま。 */
 function typed<T extends DocumentData>(): FirestoreDataConverter<T> {
@@ -15,6 +16,12 @@ function typed<T extends DocumentData>(): FirestoreDataConverter<T> {
     fromFirestore: (snap) => snap.data() as T,
   };
 }
+
+/** 読むときは Schedule にし、書くときはその項目をそのまま保存する。 */
+const scheduleConverter: FirestoreDataConverter<Schedule, ScheduleData> = {
+  toFirestore: (schedule) => ({ ...schedule }) as WithFieldValue<ScheduleData>,
+  fromFirestore: (snap) => new Schedule(snap.data() as ScheduleData),
+};
 
 /**
  * 読んだときの版（ドキュメントの updateTime）。保存するとき、読んでから誰も書き換えていないことを確かめるのに使う。
@@ -58,6 +65,11 @@ export const sessionsRef = (uid: string) =>
 /** すべてのユーザーのセッション（定期実行が探すとき用） */
 export const allSessions = () =>
   getFirestore().collectionGroup('sessions').withConverter(sessionConverter);
+export const schedulesRef = (uid: string) =>
+  getFirestore().collection(`users/${uid}/schedules`).withConverter(scheduleConverter);
+/** すべてのユーザーのスケジュール（定期実行が探すとき用） */
+export const allSchedules = () =>
+  getFirestore().collectionGroup('schedules').withConverter(scheduleConverter);
 
 export type SessionRef = DocumentReference<Session, SessionData>;
 
@@ -100,7 +112,26 @@ export async function saveAllChanges(uid: string, sessions: readonly Session[]):
   }
 }
 
-export async function loadAccount(uid: string): Promise<{ settings: Settings; tokens: Tokens }> {
+/**
+ * 精算が済んでいないセッション（進行中・エラー）を 1 件でも持っているか。
+ * 持っている間は「タスク中」とみなし、設定のうち約束の条件になるもの（APIトークンと取り消し猶予）を変えさせない。
+ */
+export async function hasUnsettledSession(uid: string): Promise<boolean> {
+  const snap = await sessionsRef(uid).where('status', 'in', UNSETTLED_STATUSES).limit(1).get();
+  return !snap.empty;
+}
+
+export interface Account {
+  settings: Settings;
+  tokens: Tokens;
+}
+
+/** Beeminder で課金できるか。課金できないなら、セッションを始めない（課金できない約束は作らない）。 */
+export function canCharge({ settings, tokens }: Account): boolean {
+  return Boolean(tokens.beeminderToken && settings.beeminderUser);
+}
+
+export async function loadAccount(uid: string): Promise<Account> {
   const [user, secret] = await Promise.all([userRef(uid).get(), secretRef(uid).get()]);
   return {
     settings: { ...DEFAULT_SETTINGS, ...user.data() },

@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Session } from '../src/session.ts';
+import { Session, validateStartSessionInput } from '../src/session.ts';
+import { InvalidInputError } from '../src/errors.ts';
+import { displayStatus, hasCustomStart, progressLabel, progressRatio } from '../src/sessionView.ts';
+import { chargeNote } from '../src/settle.ts';
 import type { SessionData } from '../src/model.ts';
 
 const MIN = 60 * 1000;
@@ -21,7 +24,7 @@ test('start は active で、締切の少し後に精算を予定する', () => 
   assert.equal(s.projectId, 1);
   assert.equal(s.checkAt, s.settleTime());
   assert.ok(s.settleTime() > s.due);
-  assert.equal(s.hasCustomStart, false);
+  assert.equal(hasCustomStart(s), false);
 });
 
 
@@ -29,8 +32,8 @@ test('状態を変えるメソッドは自身を書き換え、変えた項目�
   const s = start();
   s.progress(1800, NOW);
   assert.equal(s.trackedSec, 1800);
-  assert.equal(s.progressRatio, 0.5);
-  assert.equal(s.progressLabel(), '30分 / 1時間00分');
+  assert.equal(progressRatio(s), 0.5);
+  assert.equal(progressLabel(s), '30分 / 1時間00分');
   assert.deepEqual(s.changes, { trackedSec: 1800, updatedAt: NOW });
   // 覚えている変更は Firestore に保存する項目（{ ...session }）には入らない
   assert.equal(Object.keys({ ...s }).includes('changes'), false);
@@ -41,9 +44,9 @@ test('状態を変えるメソッドは自身を書き換え、変えた項目�
 
 test('締切を過ぎた active は「精算待ち」として見せる', () => {
   const s = start();
-  assert.equal(s.displayStatus(NOW), 'active');
-  assert.equal(s.displayStatus(s.due), 'settling');
-  assert.equal(make({ status: 'charged' }).displayStatus(s.due), 'charged');
+  assert.equal(displayStatus(s, NOW), 'active');
+  assert.equal(displayStatus(s, s.due), 'settling');
+  assert.equal(displayStatus(make({ status: 'charged' }), s.due), 'charged');
 });
 
 test('isClaimable: 精算済み・ロック中・課金されたか分からないものは取れない', () => {
@@ -62,7 +65,7 @@ test('isClaimable: 精算済み・ロック中・課金されたか分からな�
 });
 
 test('chargeNote は ID の頭を入れる', () => {
-  assert.equal(start().chargeNote(), 'Toggl Ratchet: 資格 / 過去問 1時間00分 (abcdefgh)');
+  assert.equal(chargeNote(start()), 'Toggl Ratchet: 資格 / 過去問 1時間00分 (abcdefgh)');
 });
 
 test('progress: 締切前に届けば達成、締切後は届いていても達成にしない', () => {
@@ -138,4 +141,36 @@ test('結果が出たあとなら、retryLater / stopForReview は何もしな�
   assert.equal(charged.status, 'charged');
   assert.equal(charged.charge?.id, 'c');
   assert.equal(charged.changes.status, 'charged');
+});
+
+test('取り消し: 期限より前の active だけ。取り消したら精算せず、一覧から消せる', () => {
+  // 期限の無いセッションは取り消せない
+  assert.equal(start().isCancelable(NOW), false);
+
+  const s = make({ startAt: NOW + 60 * MIN, cancelableUntil: NOW + 30 * MIN });
+  assert.equal(displayStatus(s, NOW), 'waiting');
+  assert.equal(s.isCancelable(NOW + 30 * MIN), false);
+  assert.throws(() => s.cancel(NOW + 30 * MIN), /期限を過ぎて/);
+
+  s.cancel(NOW);
+  assert.equal(s.status, 'canceled');
+  assert.equal(s.checkAt, null);
+  assert.equal(s.isSettled, true);
+  assert.equal(s.isClaimable(NOW), false);
+  assert.equal(s.isCancelable(NOW), false);
+  assert.equal(displayStatus(s, NOW + 200 * MIN), 'canceled');
+});
+
+test('validateStartSessionInput: 正しくなければ、画面に出せる文の InvalidInputError を投げる', () => {
+  const ok = { requiredSec: 3600, startAt: null, due: NOW + 120 * MIN, dollars: 5 };
+  assert.doesNotThrow(() => validateStartSessionInput(ok, NOW));
+  const fails = (patch: Partial<typeof ok> | { startAt: number }, message: RegExp) =>
+    assert.throws(() => validateStartSessionInput({ ...ok, ...patch }, NOW), (err) => err instanceof InvalidInputError && message.test(err.message));
+  fails({ due: NOW }, /締切が過ぎています/);
+  fails({ startAt: NOW - 31 * 24 * 60 * MIN }, /30日前まで/);
+  fails({ requiredSec: 0 }, /作業時間を入力/);
+  fails({ dollars: 0 }, /\$1以上/);
+  fails({ requiredSec: 3 * 3600 }, /締切まで2時間00分しかありません/);
+  // カウント開始を指定したら、そこから締切までで比べる
+  fails({ startAt: NOW + 90 * MIN }, /締切まで30分しかありません/);
 });

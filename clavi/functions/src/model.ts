@@ -1,10 +1,13 @@
-// Firestore に置くデータの形と、画面から呼ぶ関数の引数・戻り値。
+// Firestore に置くデータの形（画面から呼ぶ関数の引数・戻り値は requests.ts）。
 // Web アプリ（clavi/lib, components）もここを import するので、Node や firebase-admin に依存しないこと。
 //
 //   users/{uid}                … Settings（本人も読める）
 //   secrets/{uid}              … Tokens（Functions からしか読めない）
 //   users/{uid}/sessions/{id}  … SessionData（本人も読める。振る舞いは session.ts の Session クラス）
+//   users/{uid}/schedules/{id} … ScheduleData（本人も読める。振る舞いは schedule.ts の Schedule クラス）
 // 時刻（〜At, due など）は epoch ms。
+
+import { DEFAULT_CANCEL_MINUTES } from './cancel.ts';
 
 export interface Settings {
   /** Toggl のタグ名（入力補完用） */
@@ -17,6 +20,12 @@ export interface Settings {
   beeminderUser: string;
   /** 最後に開始したセッションの作業時間。新しいセッションの入力欄の初期値に使う */
   lastRequiredSec: number;
+  /**
+   * スケジュールの各回のセッションを取り消せるのは、カウント開始のこの分前まで。
+   * スケジュールを作るときはこの値を使う（スケジュールごとには決めない）。
+   * 未精算のセッションがある間は変えられない（走っている約束の条件を、あとから緩められないようにする）。
+   */
+  cancelMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hasBeeminderToken: false,
   beeminderUser: '',
   lastRequiredSec: 0,
+  cancelMinutes: DEFAULT_CANCEL_MINUTES,
 };
 
 export interface TogglProject {
@@ -38,7 +48,15 @@ export interface Tokens {
   beeminderToken: string;
 }
 
-export type SessionStatus = 'active' | 'done' | 'charged' | 'error';
+/** canceled は、取り消せる期限までに取り消したもの（精算しない） */
+export type SessionStatus = 'active' | 'done' | 'charged' | 'error' | 'canceled';
+
+/**
+ * まだ精算が済んでいない（課金するか決まっていない）状態。Session.isSettled の裏。
+ * これが 1 件でもあれば「タスク中」とみなし、設定の一部をロックする。
+ * firestore.rules の「一覧から消せる状態」はこの残り（done, charged, canceled）なので、変えたらそちらも直す。
+ */
+export const UNSETTLED_STATUSES: readonly SessionStatus[] = ['active', 'error'];
 
 /** カウント開始を過去にできる限度。Toggl から取る記録の範囲が広がりすぎないようにする */
 export const MAX_START_PAST_MS = 30 * 24 * 60 * 60 * 1000;
@@ -91,64 +109,52 @@ export interface SessionData {
   chargeRequestedAt: number | null;
   /** 精算で最初に測った作業時間。再試行ではこれを使い、Toggl を測り直さない */
   measuredSec: number | null;
-}
-
-/** Toggl の time entry のうち、進捗の計算に使う部分。 */
-export interface TimeEntry {
-  start: string;
-  stop: string | null;
-  /** 計測中は負の値 */
-  duration: number;
-  project_id: number | null;
-  tags: string[] | null;
-}
-
-// ---- 画面から呼ぶ関数（Cloud Functions の callable） ----
-
-export interface SaveSettingsRequest {
-  /** 空欄なら変更しない */
-  togglToken: string;
-  /** 空欄なら変更しない */
-  beeminderToken: string;
-}
-
-export interface SaveSettingsResponse {
-  ok: boolean;
-  message: string;
-}
-
-export interface StartSessionRequest {
-  projectId: number | null;
-  tag: string;
-  requiredSec: number;
-  /** 数え始める時刻。null なら開始した時刻から */
-  startAt: number | null;
-  due: number;
-  dollars: number;
-}
-
-export interface StartSessionResponse {
-  id: string;
-}
-
-export interface SyncNowResponse {
-  /** 達成になったセッションのタイトル */
-  done: string[];
+  /** スケジュールから作ったなら、そのスケジュールの ID（スケジュールより前に作ったセッションには無い） */
+  scheduleId?: string | null;
+  /** この時刻より前なら取り消せる。null なら取り消せない（解除期限より前に作ったセッションには無い） */
+  cancelableUntil?: number | null;
 }
 
 /**
- * 課金されたか分からないセッションへの人の判断。
- *   charged     … Beeminder の履歴に課金があった。課金せずに課金済みにする
- *   not_charged … 履歴に課金がなかった。印を消してもう一度精算する
+ * 繰り返しのきまり。どの日が回の日かを決める（振る舞いは recurrence.ts の各クラス）。
+ * from は起点の日付で、これより前は回にしない。interval 日・週・か月ごとの「ごと」も from から数える。
  */
-export type ChargeResolution = 'charged' | 'not_charged';
+export type RecurrenceData =
+  | { kind: 'daily'; from: string; interval: number }
+  /** weekdays は 0 が日曜 */
+  | { kind: 'weekly'; from: string; interval: number; weekdays: number[] }
+  /** その日が無い月（31日など）は飛ばす */
+  | { kind: 'monthlyByDay'; from: string; interval: number; day: number }
+  /** week は 1〜4、最後の週なら -1 */
+  | { kind: 'monthlyByWeekday'; from: string; interval: number; week: number; weekday: number };
 
-export interface SettleNowRequest {
+/**
+ * 繰り返しの約束。各回のセッションを、取り消せる期限より前もって作っておく（generate.ts）。
+ * 休みたい回は、そのセッションを期限までに取り消す。
+ * 時刻はすべて timeZone で読む（日付は "YYYY-MM-DD"、〜Minutes はその日の 0:00 からの分）。
+ */
+export interface ScheduleData {
   id: string;
-  resolve?: ChargeResolution;
-}
-
-export interface SettleResult {
-  status: SessionStatus;
+  /** 数える Toggl のプロジェクト。null ならプロジェクトで絞らない */
+  projectId: number | null;
+  projectName: string;
+  tag: string;
+  requiredSec: number;
+  dollars: number;
+  /** どの日が回の日か */
+  repeat: RecurrenceData;
+  startMinutes: number;
+  /** 開始の時刻以前なら、翌日の締切 */
+  dueMinutes: number;
+  /** 各回のセッションを取り消せるのは、カウント開始のこの分前まで（作ったときの設定の値を控えたもの） */
+  cancelMinutes: number;
+  /** IANA のタイムゾーン名（作った画面のもの） */
+  timeZone: string;
+  createdAt: number;
+  /** まだセッションを作っていない最初の回の日付。もう回が無ければ null */
+  nextDate: string | null;
+  /** その回のセッションを作る時刻。定期実行はこれを見て探す */
+  nextCreateAt: number | null;
+  /** 最後にセッションを作れなかった理由。作れたら空 */
   message: string;
 }

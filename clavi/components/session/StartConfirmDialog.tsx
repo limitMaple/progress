@@ -1,30 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { sessionTitle, formatDuration, formatDay } from "@/functions/src/progress";
-import { targetLabel } from "@/components/session/common";
-import type { Draft } from "@/components/session/NewSessionForm";
-
-const WEEKDAYS = "日月火水木金土";
-
-/** 「9/30（火）」の形。 */
-function formatDate(ms: number): string {
-    const d = new Date(ms);
-    return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
-}
-
-/** 「9:05」の形。 */
-function formatClock(ms: number): string {
-    const d = new Date(ms);
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+import { sessionTitle, formatClock, formatDate, formatDuration, formatDay } from "@/functions/src/format";
+import { targetLabel } from "@/functions/src/format";
+import type { StartConfirmation } from "@/components/session/NewSessionForm";
 
 /**
  * 開始前の確認画面。開始したあとは内容を変えられないので、締切とカウント開始を
  * 取り違えていないか（日付を 1 日ずらしていないか、など）をここで大きく見せる。
  */
 export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
-    draft: Draft;
+    draft: StartConfirmation;
     busy: boolean;
     onBack: () => void;
     onStart: () => void;
@@ -36,6 +22,7 @@ export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
 
     const now = Date.now();
     const day = formatDay(draft.due, now);
+    const { cancelableUntil } = draft;
 
     return (
         // Esc で閉じたときも「戻って直す」と同じ扱いにする
@@ -63,10 +50,17 @@ export default function StartConfirmDialog({ draft, busy, onBack, onStart }: {
                 <dd>{targetLabel(draft)}</dd>
                 <dt>金額</dt>
                 <dd>${draft.dollars}</dd>
+                <dt>取り消し</dt>
+                <dd>
+                    {cancelableUntil == null
+                        ? "できません"
+                        : `${formatDate(cancelableUntil)} ${formatClock(cancelableUntil)} まで`}
+                </dd>
             </dl>
 
             <p className="confirm-warning">
-                開始したあとは変更できません。締切までに届かなければ、Beeminder で ${draft.dollars} が課金されます。
+                開始したあとは変更できません{cancelableUntil == null ? "" : "（取り消しは期限までだけ）"}。
+                締切までに届かなければ、Beeminder で ${draft.dollars} が課金されます。
             </p>
 
             <div className="confirm-buttons">
