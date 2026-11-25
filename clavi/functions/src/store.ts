@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import type {
   DocumentData, DocumentReference, FirestoreDataConverter, Timestamp, WithFieldValue, WriteBatch,
 } from 'firebase-admin/firestore';
-import { DEFAULT_SETTINGS } from './model.ts';
+import { DEFAULT_SETTINGS, UNSETTLED_STATUSES } from './model.ts';
 import type { ScheduleData, SessionData, Settings, Tokens } from './model.ts';
 import { Session } from './session.ts';
 import { Schedule } from './schedule.ts';
@@ -110,6 +110,15 @@ export async function saveAllChanges(uid: string, sessions: readonly Session[]):
   } catch (err) {
     throw isPreconditionFailure(err) ? new ConflictError(changed.map((s) => s.id).join(', ')) : err;
   }
+}
+
+/**
+ * 精算が済んでいないセッション（進行中・エラー）を 1 件でも持っているか。
+ * 持っている間は「タスク中」とみなし、設定のうち約束の条件になるもの（APIトークンと取り消し猶予）を変えさせない。
+ */
+export async function hasUnsettledSession(uid: string): Promise<boolean> {
+  const snap = await sessionsRef(uid).where('status', 'in', UNSETTLED_STATUSES).limit(1).get();
+  return !snap.empty;
 }
 
 export async function loadAccount(uid: string): Promise<{ settings: Settings; tokens: Tokens }> {

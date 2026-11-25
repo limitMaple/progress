@@ -9,6 +9,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as logger from 'firebase-functions/logger';
 import {
   loadAccount, userRef, secretRef, sessionsRef, allSessions, claimSettlement, schedulesRef, allSchedules, saveChanges,
+  hasUnsettledSession,
 } from './src/store.ts';
 import { syncSessions } from './src/sync.ts';
 import { settleSession, settleManually } from './src/settle.ts';
@@ -18,7 +19,7 @@ import { generateSessions } from './src/generate.ts';
 import { Schedule, windowMinutes } from './src/schedule.ts';
 import { recurrenceFrom } from './src/recurrence.ts';
 import { isTimeZone } from './src/calendar.ts';
-import { MAX_START_PAST_MS } from './src/model.ts';
+import { isCancelMinutes, MAX_START_PAST_MS } from './src/model.ts';
 import type {
   CancelSessionRequest, ChargeResolution, CreateScheduleRequest, CreateScheduleResponse, RecurrenceData,
   SaveSettingsRequest, SaveSettingsResponse, SettleNowRequest, SettleResult, Settings, StartSessionRequest,
@@ -54,9 +55,8 @@ function onAuthenticatedCall<Req, Res>(
 
 const invalid = (message: string) => new HttpsError('invalid-argument', message);
 const MIN = 60 * 1000;
-// 取り消せる期限は、カウント開始の 1 週間前まで
-const MAX_CANCEL_MINUTES = 7 * 24 * 60;
-const isCancelMinutes = (n: number) => Number.isInteger(n) && n >= 0 && n <= MAX_CANCEL_MINUTES;
+// 未精算のセッションがある間は変えられない設定（走っている約束の条件を、あとから緩められないようにする）
+const LOCKED_MESSAGE = '進行中か精算待ちのセッションがある間は、APIトークンと取り消し猶予は変えられません';
 // セッションとスケジュールの ID は randomUUID で作る。'/' などを通すと、Firestore の想定外のパスを指せてしまう
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
@@ -65,6 +65,7 @@ const ID = /^[A-Za-z0-9-]{1,64}$/;
 export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSettingsResponse>(
   async (uid, data) => {
     const settings: Partial<Settings> = {};
+    const { settings: saved, tokens: savedTokens } = await loadAccount(uid);
 
     // 空欄のトークンは「変更しない」
     const newTokens: Partial<Tokens> = {};
@@ -72,8 +73,17 @@ export const saveSettings = onAuthenticatedCall<SaveSettingsRequest, SaveSetting
       const value = String(data[key] ?? '').trim();
       if (value) newTokens[key] = value;
     }
+    // null は「変更しない」。同じ値なら変更ではないので、ロック中でも保存できる（プロジェクトとタグの取り直し）
+    const cancelMinutes = data.cancelMinutes == null ? null : Math.floor(Number(data.cancelMinutes));
+    if (cancelMinutes != null && !isCancelMinutes(cancelMinutes)) {
+      throw invalid('取り消し猶予は、0以上の分で入力してください');
+    }
+    const changing = Object.keys(newTokens).length > 0 || (cancelMinutes != null && cancelMinutes !== saved.cancelMinutes);
+    if (changing && await hasUnsettledSession(uid)) throw invalid(LOCKED_MESSAGE);
+
     if (Object.keys(newTokens).length) await secretRef(uid).set(newTokens, { merge: true });
-    const { tokens } = await loadAccount(uid);
+    const tokens = { ...savedTokens, ...newTokens };
+    if (cancelMinutes != null) settings.cancelMinutes = cancelMinutes;
 
     const lines = ['保存しました。'];
     let ok = true;
@@ -173,7 +183,6 @@ export const createSchedule = onAuthenticatedCall<CreateScheduleRequest, CreateS
     const dollars = Math.floor(Number(data.dollars));
     const startMinutes = Number(data.startMinutes);
     const dueMinutes = Number(data.dueMinutes);
-    const cancelMinutes = Number(data.cancelMinutes);
     const timeZone = String(data.timeZone ?? '');
     let repeat: RecurrenceData;
     try {
@@ -183,7 +192,6 @@ export const createSchedule = onAuthenticatedCall<CreateScheduleRequest, CreateS
       throw invalid((err as Error).message);
     }
     if (!isMinuteOfDay(startMinutes) || !isMinuteOfDay(dueMinutes)) throw invalid('カウント開始と締切の時刻を入力してください');
-    if (!isCancelMinutes(cancelMinutes)) throw invalid('取り消せる期限が正しくありません');
     if (!isTimeZone(timeZone)) throw invalid('タイムゾーンが正しくありません');
     if (!(requiredSec > 0)) throw invalid('作業時間を入力してください');
     if (!(dollars >= 1)) throw invalid('金額は$1以上にしてください');
@@ -199,6 +207,9 @@ export const createSchedule = onAuthenticatedCall<CreateScheduleRequest, CreateS
     if (project === undefined) {
       throw invalid('そのプロジェクトは選べません。設定を保存し直して、プロジェクトの一覧を取り直してください');
     }
+    // 取り消し猶予は設定のものを使う（スケジュールごとには決めない）。控えるので、あとで設定が変わっても影響しない
+    const { cancelMinutes } = settings;
+    if (!isCancelMinutes(cancelMinutes)) throw invalid('設定の取り消し猶予が正しくありません。設定を保存し直してください');
 
     const schedule = Schedule.create({
       id: randomUUID(), now, project, tag, requiredSec, dollars, repeat, startMinutes, dueMinutes, cancelMinutes, timeZone,

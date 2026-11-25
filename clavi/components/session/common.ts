@@ -41,6 +41,8 @@ export type FormProps = {
     /** 選択肢。設定が変われば追従する */
     projects: TogglProject[];
     tags: string[];
+    /** 設定の取り消し猶予（分）。スケジュールの各回をいつまで取り消せるか */
+    cancelMinutes: number;
     disabled: boolean;
     setBusy: (busy: boolean) => void;
     setMessage: (message: Message) => void;

@@ -18,7 +18,22 @@ export interface Settings {
   beeminderUser: string;
   /** 最後に開始したセッションの作業時間。新しいセッションの入力欄の初期値に使う */
   lastRequiredSec: number;
+  /**
+   * スケジュールの各回のセッションを取り消せるのは、カウント開始のこの分前まで。
+   * スケジュールを作るときはこの値を使う（スケジュールごとには決めない）。
+   * 未精算のセッションがある間は変えられない（走っている約束の条件を、あとから緩められないようにする）。
+   */
+  cancelMinutes: number;
 }
+
+/** 取り消し猶予の初めの値（カウント開始の 1 時間前まで取り消せる）。 */
+export const DEFAULT_CANCEL_MINUTES = 60;
+
+/** 取り消し猶予の上限。カウント開始の 1 週間前まで。 */
+export const MAX_CANCEL_MINUTES = 7 * 24 * 60;
+
+/** 取り消し猶予として使える分か。 */
+export const isCancelMinutes = (n: number) => Number.isInteger(n) && n >= 0 && n <= MAX_CANCEL_MINUTES;
 
 export const DEFAULT_SETTINGS: Settings = {
   tags: [],
@@ -27,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hasBeeminderToken: false,
   beeminderUser: '',
   lastRequiredSec: 0,
+  cancelMinutes: DEFAULT_CANCEL_MINUTES,
 };
 
 export interface TogglProject {
@@ -41,6 +57,12 @@ export interface Tokens {
 
 /** canceled は、取り消せる期限までに取り消したもの（精算しない） */
 export type SessionStatus = 'active' | 'done' | 'charged' | 'error' | 'canceled';
+
+/**
+ * まだ精算が済んでいない（課金するか決まっていない）状態。Session.isSettled の裏。
+ * これが 1 件でもあれば「タスク中」とみなし、設定の一部をロックする。
+ */
+export const UNSETTLED_STATUSES: SessionStatus[] = ['active', 'error'];
 
 /** カウント開始を過去にできる限度。Toggl から取る記録の範囲が広がりすぎないようにする */
 export const MAX_START_PAST_MS = 30 * 24 * 60 * 60 * 1000;
@@ -130,7 +152,7 @@ export interface ScheduleData {
   startMinutes: number;
   /** 開始の時刻以前なら、翌日の締切 */
   dueMinutes: number;
-  /** 各回のセッションを取り消せるのは、カウント開始のこの分前まで */
+  /** 各回のセッションを取り消せるのは、カウント開始のこの分前まで（作ったときの設定の値を控えたもの） */
   cancelMinutes: number;
   /** IANA のタイムゾーン名（作った画面のもの） */
   timeZone: string;
@@ -160,6 +182,8 @@ export interface SaveSettingsRequest {
   togglToken: string;
   /** 空欄なら変更しない */
   beeminderToken: string;
+  /** 取り消し猶予（分）。null なら変更しない */
+  cancelMinutes: number | null;
 }
 
 export interface SaveSettingsResponse {
@@ -187,7 +211,6 @@ export interface CreateScheduleRequest {
   repeat: RecurrenceData;
   startMinutes: number;
   dueMinutes: number;
-  cancelMinutes: number;
   timeZone: string;
 }
 

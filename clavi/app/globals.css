@@ -321,6 +321,9 @@ dialog.confirm h2 { margin: 0 0 4px; font-size: 13px; }
 .settings form { display: flex; flex-direction: column; gap: 16px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; }
 .settings label > span { font-weight: 600; }
+/* ラベルではない行（取り消し猶予の「カウント開始の…分前まで」）は、ふつうの太さで */
+.settings label > span.row { font-weight: 400; }
+.settings small.error { color: var(--error); }
 .settings input { width: 100%; }
 .settings input.num { width: 100px; }
 .buttons { display: flex; gap: 8px; }

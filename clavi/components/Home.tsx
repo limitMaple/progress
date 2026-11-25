@@ -100,6 +100,7 @@ function Panel({ tab, panel }: { tab: Tab<Listed>; panel: PanelProps }) {
                 initialRequiredSec={settings.lastRequiredSec}
                 projects={settings.projects}
                 tags={settings.tags}
+                cancelMinutes={settings.cancelMinutes}
                 disabled={disabled}
                 setBusy={setBusy}
                 setMessage={setMessage}
